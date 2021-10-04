@@ -9,8 +9,9 @@ logging.basicConfig(level=utils.logginglevel)
 
 class FeatureList:
     def __init__(self, io):
-        df = load_data(io)
+        df = load_data(io, header=False, index=False)
         assert isinstance(df, pd.DataFrame)
+        logging.info(f"Loaded feature list from {io} -- {df.shape[0]} features")
         col = df.columns[0]
         self.__name = col.strip().replace(" ", "_")
         self.__features = df[col]
@@ -32,9 +33,6 @@ class Dataset:
         if io is not None:
             self.df = load_data(io) 
             assert isinstance(self.df, pd.DataFrame)
-            if "ID" in self.df.columns: #### XXX to parametrize
-                self.df.set_index("ID", inplace=True)
-                logging.info(f"Dataset loaded: shape {self.df.shape}")
 
     @property
     def data(self):
@@ -49,29 +47,14 @@ class Dataset:
         df_attempts = (df, df.T)
         df_merged = None 
 
-
+        present_cols = set(self.df.columns)
 
         for att in df_attempts:
-            print(att)
-            #set column names if for some reason they're already not present 
-            if type(att.columns) is pd.RangeIndex:
-                att.columns = att.iloc[0]
-                att.drop(att.index[0], inplace=True)
-
             res = pd.merge(self.df, att, left_index=True, right_index=True)
 
             if not res.empty:
-                # nr, nc = res.shape  #current shape 
-                # nc_exp = att.shape[1] + self.df.shape[1] #new num of columns is at least 
-
-                cols_data = set(self.df.columns)
-                if set(res.columns).intersection(cols_data) == cols_data:
+                if set(res.columns).difference(att.columns) == present_cols:
                     df_merged = res 
-
-
-                # if nr == self.df.shape[0] and nc <= nc_exp:
-                #     df_merged = res 
-                #     break
 
         assert df_merged is not None
         self.df = df_merged
@@ -107,34 +90,27 @@ class Dataset:
 
 
 class BinaryClfDataset(Dataset):
-    def __init__(self, io, y_name, allowed_values, new_init=True) -> None:
+    
+    def __init__(self, io, target_cov: str = None, allowed_values : tuple = None) -> None:
         super().__init__(io)
 
         self.target = None 
         self.encoding = None 
         self.target_labels = None 
 
-        if new_init:
-            target_cov = y_name
+        if target_cov:
             if allowed_values is None:
-                raise Exception("Allowed values is None --> lol")
-                ### XXX if allowed_values is null, obtain labels from data - explode if |labels| != 2 
-            
-            if len(allowed_values) != 2:
-                raise MultipleLabelsException(allowed_values)
-
+                allowed_values = self.df[target_cov].unique()
+                if allowed_values.size != 2:
+                    raise MultipleLabelsException(allowed_values)
+                    
             mask = self.df[target_cov].isin(allowed_values)
             df_masked = self.df[mask]
 
-            encoding = {label: encoding for encoding, label in enumerate(allowed_values)}
-            target = df_masked[target_cov].replace(encoding).to_numpy()
-            covariate_matrix = df_masked.drop(columns=[target_cov])
-
-            #assign useful stuff: X and Y values,  label encoding etc 
-            self.df = covariate_matrix
-            self.target = target 
-            self.encoding = encoding
-            self.target_labels = allowed_values 
+            self.encoding = {label: encoding for encoding, label in enumerate(allowed_values)}
+            self.target = df_masked[target_cov].replace( self.encoding )
+            self.df = df_masked.drop( columns=[target_cov] )
+            self.target_labels = allowed_values
 
 
     def extract_subdata(self, features: FeatureList):
@@ -144,11 +120,7 @@ class BinaryClfDataset(Dataset):
             raise Exception(f"Unsupported type: {type(features)}")
 
         try:
-            df = self.df[features.features]
-            subdata = BinaryClfDataset(df, None, None, new_init=False)
-            subdata.target = self.target 
-            subdata.target_labels = self.target_labels
-            
+            subdata = self.__copy(features) 
         except KeyError: #cannot find features is df 
             # print("Cannot find features in matrix....")
             raise Exception(f"Cannot extract features {features.features} from matrix")
@@ -157,6 +129,15 @@ class BinaryClfDataset(Dataset):
         return subdata
 
 
+    def __copy(self, features: FeatureList = None):
+        new_df = self.df[features.features] if features else self.df 
+
+        bcd = BinaryClfDataset(new_df)
+        bcd.target = self.target
+        bcd.encoding = self.encoding
+        bcd.target_labels = self.target_labels
+        
+        return bcd 
         
 
 
@@ -164,7 +145,7 @@ class BinaryClfDataset(Dataset):
 
 class MultipleLabelsException(Exception):
     def __init__(self, labels):
-        message = "The dataset contains more than 2 labels ({}). You have to specify the --binary option.".format(labels)
+        message = f"The dataset contains more than 2 labels ({labels}).\nPlease specify the --labels option."
         super().__init__(message)
 
 
@@ -175,9 +156,10 @@ def load_xlsx(filename, sheet_name = None):
         return pd.read_excel(xlsx, sheet_name)
 
 
-def load_data(io):
+def load_data(io, header=True, index=True):
     logging.info(f"Loading dataset from {type(io)}")
     df = None 
+
     if isinstance(io, str):
         logging.info(f"Loading dataset from file {io}")
         filename = io 
@@ -187,7 +169,13 @@ def load_data(io):
             df = load_xlsx(filename)
         elif extfile in ("csv", "tsv"):
             sep = "," if extfile == "csv" else "\t"
-            df = pd.read_csv(filename, sep=sep) #XXX header ? 
+            args = dict(filepath_or_buffer=filename, sep=sep)
+            if header:
+                args["header"] = 0
+            if index:
+                args["index_col"] = 0
+            df = pd.read_csv(**args)
+
     elif isinstance(io, pd.DataFrame):
         df = io.copy()
     elif isinstance(io, Dataset):

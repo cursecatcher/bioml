@@ -172,29 +172,19 @@ class FeaturesSearcher:
 
 def best_k_finder(dataset: ds.BinaryClfDataset, features: ds.FeatureList, output_folder: str, num_trials: int, num_folds: int):
     data = dataset.extract_subdata(features)
-    # subdataset_name = features.name
+
+    print(data.data)
 
     current_output_folder = os.path.join(output_folder, features.name, "k_best")
     FeaturesSearcher(data, current_output_folder, features.name).evaluate(num_trials, num_folds)    
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
-    parser.add_argument("-o", "--outfolder", type=str, required=True)
-    parser.add_argument("-i", "--input_data", type=str, required=True)
-    parser.add_argument("-m", "--more_data", type=str, required=False)
-    parser.add_argument("-t", "--target", type=str, required=True)
-    parser.add_argument("-l", "--labels", type=str, nargs=2)
-    parser.add_argument("-f", "--feature_lists", type=str, nargs="+")
-    parser.add_argument("--trials", type=int, default=1)
-    parser.add_argument("--ncv", type=int, default=10)
-
+    parser = utils.get_parser("feature selection")
     args = parser.parse_args()
 
-
-
     dataset = ds.Dataset(args.input_data)
-    #integrate count matrix  
+
     if args.more_data:
         dataset.load_data(args.more_data)
 
