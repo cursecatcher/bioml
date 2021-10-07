@@ -1,6 +1,6 @@
 
-import logging
 import pandas as pd
+import os 
 
 import utils 
 import logging
@@ -11,32 +11,68 @@ class FeatureList:
     def __init__(self, io):
         df = load_data(io, header=False, index=False)
         assert isinstance(df, pd.DataFrame)
+        if len(df.columns) > 1:
+            raise InvalidFeatureListException(io)
         logging.info(f"Loaded feature list from {io} -- {df.shape[0]} features")
+
         col = df.columns[0]
         self.__name = col.strip().replace(" ", "_")
         self.__features = df[col]
 
 
     @property
-    def name(self):
+    def name(self) -> str:
         return self.__name 
     
     @property
-    def features(self):
+    def features(self) -> pd.Series:
         return self.__features 
+
+    @classmethod
+    def load_from_path(cls, path) -> list:
+        def try_load_flist(path) -> FeatureList:
+            list_or_none = None 
+            try:
+                list_or_none = FeatureList(path)
+            except InvalidFeatureListException:
+                print(f"Unable to load feature list from {path}. Skipped.")
+            return list_or_none
+
+        flists = list() 
+
+        if os.path.isdir(path):
+            for root, _, files in os.walk(path):
+                path_ = lambda f: os.path.join(root, f)
+                flists.extend([ try_load_flist( path_(f) ) for f in files ])
+
+        elif os.path.isfile(path):
+            flists.append( try_load_flist(path) )
+
+        return [x for x in flists if x is not None]
 
 
 class Dataset:
     def __init__(self, io = None) -> None:
         self.df = None 
+        self.__name = None 
 
         if io is not None:
             self.df = load_data(io) 
             assert isinstance(self.df, pd.DataFrame)
 
     @property
-    def data(self):
+    def data(self) -> pd.DataFrame:
         return self.df 
+    
+    @property
+    def name(self) -> str:
+        return self.__name
+    
+    @name.setter 
+    def name(self, n: str):
+        self.__name = n
+    
+
 
 
     def load_data(self, io):
@@ -112,8 +148,15 @@ class BinaryClfDataset(Dataset):
             self.df = df_masked.drop( columns=[target_cov] )
             self.target_labels = allowed_values
 
+            self.encode_features()
+            self.fix_missing()
+
 
     def extract_subdata(self, features: FeatureList):
+        if features is None:
+            logging.info(f"Extract_subdata(None) => returning self {id(self)}")
+            return self 
+
         subdata = None 
 
         if not isinstance(features, FeatureList):
@@ -133,8 +176,9 @@ class BinaryClfDataset(Dataset):
         new_df = self.df[features.features] if features else self.df 
 
         bcd = BinaryClfDataset(new_df)
-        bcd.target = self.target
         bcd.encoding = self.encoding
+        bcd.name = self.name 
+        bcd.target = self.target
         bcd.target_labels = self.target_labels
         
         return bcd 
@@ -147,6 +191,15 @@ class MultipleLabelsException(Exception):
     def __init__(self, labels):
         message = f"The dataset contains more than 2 labels ({labels}).\nPlease specify the --labels option."
         super().__init__(message)
+
+
+class InvalidFeatureListException(Exception):
+    def __init__(self, filename):
+        message = f"Feature lists must have a single column; {filename} has more than one column."
+        super().__init__(message)
+
+
+
 
 
 def load_xlsx(filename, sheet_name = None):

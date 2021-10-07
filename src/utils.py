@@ -1,15 +1,35 @@
-import argparse
-import os 
+import argparse, os
+import dataset as ds 
+import pandas as pd 
 import logging
+from sklearn.metrics import classification_report
 logginglevel = logging.INFO
 
 
 
-def make_folder(starting_folder, new_foldername):
+def make_folder(starting_folder: str, new_foldername: str):
     complete_path = os.path.join(starting_folder, new_foldername)
     if not os.path.exists(complete_path):
         os.makedirs(complete_path)
     return complete_path
+
+def load_feature_lists(starting_folders: list):
+    feature_lists = list() 
+    if starting_folders is not None: 
+        for x in starting_folders:
+            feature_lists.extend( ds.FeatureList.load_from_path(x) )
+    return feature_lists
+
+def nice_classification_report(y_true, y_pred, target_names: list):
+    report = classification_report(y_true, y_pred, target_names=target_names, output_dict=True)
+    nice_report = dict()
+    
+    for t in target_names:
+        for statname, value in report.get(t).items():
+            nice_report[f"{t}_{statname}"] = value 
+    nice_report["accuracy"] = report.get("accuracy")
+    return nice_report
+
 
 def get_parser(prog: str) -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog)

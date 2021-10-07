@@ -273,7 +273,6 @@ class FromModelEstimator(AbstractPipeline):
                 ("selector", SelectFromModel(estimator, max_features=k, threshold=-np.inf))
             ])
 
-
 class EstimatorWithoutFS(AbstractPipeline):
     def __init__(self, dataset):
         super().__init__(dataset, [

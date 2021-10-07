@@ -1,7 +1,6 @@
 #!/usr/bin/env python3 
 
 
-import argparse
 import dataset as ds 
 import pandas as pd 
 import os 
@@ -21,7 +20,7 @@ logging.basicConfig(level=utils.logginglevel)
 class FeaturesSearcher:
     def __init__(self, dataset: ds.BinaryClfDataset, output_folder: str, dataname : str = None) -> None:
         self.__output_folder = output_folder
-        self.__target_labels = dataset.target_labels
+        # self.__target_labels = dataset.target_labels
         self.__df = dataset
         self.__name = "" if dataname is None else dataname
         #a list of length equal to the maximum number of features
@@ -52,15 +51,17 @@ class FeaturesSearcher:
         
 
         for k in range(1, ntot_f + 1):
-            logging.info(f"Progress: {k} features / {ntot_f}")
+            logging.info(f"Progress: {k}/{ntot_f}")
 
             #get pipelines 
             estimators = [ssz.KBestEstimator, ssz.FromModelEstimator]
             pipelines = reduce(operator.concat, [ 
                 [*map(lambda x: x[0], e(df, k).get_pipelines())] for e in estimators ])
 
-            evaluator = mlbox.PipelinesEvaluator(df, y, n_folds=n_folds, target_labels=self.__target_labels )
-            df_eval = evaluator.evaluate(pipelines, os.path.join(outfolder, f"k_{k}"))
+            # evaluator = mlbox.PipelinesEvaluator(df, y, n_folds=n_folds, target_labels=self.__target_labels )
+            evaluator = mlbox.PipelinesEvaluator(self.__df, n_folds=n_folds )
+            dict_eval = evaluator.evaluate(pipelines, os.path.join(outfolder, f"k_{k}"))
+            df_eval = dict_eval.get("metrics_report")
             df_eval["n_features"] = k 
             dfs.append(df_eval)
 
@@ -70,6 +71,18 @@ class FeaturesSearcher:
             except IndexError:
                 #add the k-th list if it doesn't exist
                 self.__evaluation_k_features.append([evaluator])
+
+        # print("#################################")
+        # print(type(dfs))
+        
+        # print(f"Len list: {len(dfs)}")
+
+        # for x in dfs:
+        #     print(type(x))
+        #     print(list(x.keys()))
+
+        # df = pd.concat(dfs)
+        # logging.info(df)
 
         return pd.concat(dfs)
 
@@ -113,7 +126,7 @@ class FeaturesSearcher:
                             chosen_features.extend([
                             it.best_features[clf_name]["mean"].sort_values(ascending=False).index \
                                 for it in result_run])
-                        
+                                
                         feature_importances = pd.DataFrame(data=[x.to_series().tolist() for x in chosen_features])
                         feature_selected[selector][k] = feature_importances
 
@@ -175,7 +188,9 @@ def best_k_finder(dataset: ds.BinaryClfDataset, features: ds.FeatureList, output
 
     print(data.data)
 
-    current_output_folder = os.path.join(output_folder, features.name, "k_best")
+    current_output_folder = utils.make_folder(output_folder, f"{features.name}/k_best")
+
+    # current_output_folder = os.path.join(output_folder, features.name, "k_best")
     FeaturesSearcher(data, current_output_folder, features.name).evaluate(num_trials, num_folds)    
 
 
@@ -183,15 +198,18 @@ if __name__ == "__main__":
     parser = utils.get_parser("feature selection")
     args = parser.parse_args()
 
-    dataset = ds.Dataset(args.input_data)
-
+    dataset = ds.BinaryClfDataset(args.input_data, args.target, args.labels)
     if args.more_data:
         dataset.load_data(args.more_data)
 
-    dataset = ds.BinaryClfDataset(dataset.df, args.target, args.labels)
-
-    feature_lists = [ds.FeatureList(f) for f in args.feature_lists] 
+#    feature_lists = [ds.FeatureList(f) for f in args.feature_lists] 
+    feature_lists = utils.load_feature_lists( args.feature_lists )
     for fl in feature_lists:
         print(f"List {fl.name} has {len(fl.features)} features")
-        best_k_finder(dataset, fl, args.outfolder, num_trials=args.trials, num_folds=args.ncv)
+        data = dataset.extract_subdata(fl)
+        current_outfolder = utils.make_folder(args.outfolder, f"{fl.name}/k_best")
+        FeaturesSearcher(data, current_outfolder, fl.name).evaluate(args.trials, args.ncv)
+
+
+        # best_k_finder(dataset, fl, args.outfolder, num_trials=args.trials, num_folds=args.ncv)
         
