@@ -20,14 +20,19 @@ def load_feature_lists(starting_folders: list):
             feature_lists.extend( ds.FeatureList.load_from_path(x) )
     return feature_lists
 
-def nice_classification_report(y_true, y_pred, target_names: list):
-    report = classification_report(y_true, y_pred, target_names=target_names, output_dict=True)
-    nice_report = dict()
+
+def nice_classification_report(y_true, y_pred, target_names: list) -> dict:
+
+    bad_report = classification_report(
+        y_true, y_pred, target_names=target_names, output_dict=True)
     
-    for t in target_names:
-        for statname, value in report.get(t).items():
-            nice_report[f"{t}_{statname}"] = value 
-    nice_report["accuracy"] = report.get("accuracy")
+    nice_report = {
+        f"{label}_{statname}": value \
+            for label in target_names \
+                for statname, value in bad_report.get(label).items()
+    }
+    nice_report["accuracy"] = bad_report.get("accuracy")
+
     return nice_report
 
 

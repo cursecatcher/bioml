@@ -11,6 +11,7 @@ from collections import Counter
 import numpy as np 
 
 import mlbox
+from plotting import MagicROCPlot
 import sklearn_skillz as ssz
 
 import utils 
@@ -33,14 +34,27 @@ class FeaturesSearcher:
         tmp_folder = os.path.join(self.__output_folder, "replicates", "rep_{}") ##XXX zippare ?
         #train N times the clfs on the dataset saving results in different folders 
         logging.info(f"Starting {num_trials} training-test iterations.")
-        dfs = [ 
+        # for each trial, generate a list of K dataframes (K is the total number of features). 
+        # The k-th dataframe provides classifiers metrics using k features
+        a_lot_of_dataframes = [ 
             self.__generate(tmp_folder.format(n), n_folds)  
             for n in range(1, num_trials + 1) ]
-        #merge the results of the previous step computing an average on them 
-        final_df = reduce(lambda x, y: x.add(y, fill_value=0), dfs)\
-            .apply(lambda row: row / num_trials, axis=1)
+        # build a list of dataframes grouping by the number of features
+        # so that the n-th element groups the results over the N trials 
+        final_df = list()
+        #using "unzip" to obtain a list (of dataframes) for each number of features from 1 to K
+        for k, dfs_k_features in enumerate( zip(*a_lot_of_dataframes), 1 ):
+            average_df = MagicROCPlot.reduce_replicate_run_reports(dfs_k_features)
+            average_df["n_features"] = k
+            final_df.append( average_df )
+        else:
+            final_df = pd.concat(final_df)\
+                .set_index("clf")\
+                .drop(columns=["validation_set"])
+            print(final_df)
+        
 
-        measures = ["auc"]
+        measures = ["AUC"]
         self.plot_trend(final_df, measures)
         self.make_report(final_df, measures)
     
@@ -58,10 +72,13 @@ class FeaturesSearcher:
             pipelines = reduce(operator.concat, [ 
                 [*map(lambda x: x[0], e(df, k).get_pipelines())] for e in estimators ])
 
-            # evaluator = mlbox.PipelinesEvaluator(df, y, n_folds=n_folds, target_labels=self.__target_labels )
             evaluator = mlbox.PipelinesEvaluator(self.__df, n_folds=n_folds )
-            dict_eval = evaluator.evaluate(pipelines, os.path.join(outfolder, f"k_{k}"))
-            df_eval = dict_eval.get("metrics_report")
+            samples_report, _ = evaluator.evaluate(pipelines, os.path.join(outfolder, f"k_{k}"))
+
+            df_eval = pd.concat([
+                MagicROCPlot.reduce_cv_reports(clf_report.reports) \
+                for clf_report in samples_report.plots   ])
+
             df_eval["n_features"] = k 
             dfs.append(df_eval)
 
@@ -72,19 +89,8 @@ class FeaturesSearcher:
                 #add the k-th list if it doesn't exist
                 self.__evaluation_k_features.append([evaluator])
 
-        # print("#################################")
-        # print(type(dfs))
-        
-        # print(f"Len list: {len(dfs)}")
-
-        # for x in dfs:
-        #     print(type(x))
-        #     print(list(x.keys()))
-
-        # df = pd.concat(dfs)
-        # logging.info(df)
-
-        return pd.concat(dfs)
+        #return a list of dataframes where the i-th dataframe reports results using i+1 features, i starts from 0 obviously :)
+        return dfs 
 
 
 
@@ -109,10 +115,6 @@ class FeaturesSearcher:
             for clf_name, subdf in df.groupby(df.index):
                 sorted_dfs.append( subdf.sort_values(by=[measure, "n_features"], ascending=[False, True]))
 
-                #da utilizzare o togliere 
-                # best_k = int(sorted_df.iloc[0][self.__n_features_column_name])
-                # print("{} - best number of features is {}".format(clf_name, best_k))
-
                 selector = ssz.SelectKBest if "kbest" in clf_name else ssz.SelectFromModel
                 # print(selector)
                 if feature_selected.get(selector) is None:
@@ -123,9 +125,10 @@ class FeaturesSearcher:
                         chosen_features = list() 
 
                         for result_run in evaluation:
-                            chosen_features.extend([
-                            it.best_features[clf_name]["mean"].sort_values(ascending=False).index \
-                                for it in result_run])
+                            chosen_features.extend( [
+                                it.best_features[clf_name]["mean"].sort_values(ascending=False).index \
+                                for it in result_run    
+                            ])
                                 
                         feature_importances = pd.DataFrame(data=[x.to_series().tolist() for x in chosen_features])
                         feature_selected[selector][k] = feature_importances
@@ -181,19 +184,6 @@ class FeaturesSearcher:
 
 
 
-
-
-def best_k_finder(dataset: ds.BinaryClfDataset, features: ds.FeatureList, output_folder: str, num_trials: int, num_folds: int):
-    data = dataset.extract_subdata(features)
-
-    print(data.data)
-
-    current_output_folder = utils.make_folder(output_folder, f"{features.name}/k_best")
-
-    # current_output_folder = os.path.join(output_folder, features.name, "k_best")
-    FeaturesSearcher(data, current_output_folder, features.name).evaluate(num_trials, num_folds)    
-
-
 if __name__ == "__main__":
     parser = utils.get_parser("feature selection")
     args = parser.parse_args()
@@ -202,14 +192,10 @@ if __name__ == "__main__":
     if args.more_data:
         dataset.load_data(args.more_data)
 
-#    feature_lists = [ds.FeatureList(f) for f in args.feature_lists] 
     feature_lists = utils.load_feature_lists( args.feature_lists )
+
     for fl in feature_lists:
-        print(f"List {fl.name} has {len(fl.features)} features")
+        logging.info(f"List {fl.name} has {len(fl.features)} features")
         data = dataset.extract_subdata(fl)
-        current_outfolder = utils.make_folder(args.outfolder, f"{fl.name}/k_best")
+        current_outfolder = utils.make_folder(args.outfolder, f"fselect__{fl.name}")
         FeaturesSearcher(data, current_outfolder, fl.name).evaluate(args.trials, args.ncv)
-
-
-        # best_k_finder(dataset, fl, args.outfolder, num_trials=args.trials, num_folds=args.ncv)
-        

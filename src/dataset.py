@@ -152,6 +152,19 @@ class BinaryClfDataset(Dataset):
             self.fix_missing()
 
 
+    def extract_validation_set(self, size: float) -> tuple:
+        """ Return a pair of dataset (training, validation) """
+        logging.info(f"Creating validation set of {self.name} w/ {size} size")
+
+        valid = self.__copy(df = pd.concat([
+            df.sample(frac=size) for _, df in self.data.groupby(self.target)
+        ]))
+        training = pd.concat([self.data, valid.data]).drop_duplicates(keep=False)
+        training = self.__copy(df = training)
+        
+        return training, valid 
+    
+
     def extract_subdata(self, features: FeatureList):
         if features is None:
             logging.info(f"Extract_subdata(None) => returning self {id(self)}")
@@ -172,13 +185,15 @@ class BinaryClfDataset(Dataset):
         return subdata
 
 
-    def __copy(self, features: FeatureList = None):
-        new_df = self.df[features.features] if features else self.df 
+    def __copy(self, features: FeatureList = None, df: pd.DataFrame = None):
+        new_df = df 
+        if new_df is None:
+            new_df = self.df[features.features] if features else self.df 
 
         bcd = BinaryClfDataset(new_df)
         bcd.encoding = self.encoding
         bcd.name = self.name 
-        bcd.target = self.target
+        bcd.target = self.target[bcd.data.index]    #extracts target values of samples present in the dataset 
         bcd.target_labels = self.target_labels
         
         return bcd 
@@ -210,7 +225,7 @@ def load_xlsx(filename, sheet_name = None):
 
 
 def load_data(io, header=True, index=True):
-    logging.info(f"Loading dataset from {type(io)}")
+    # logging.info(f"Loading dataset from {type(io)}")
     df = None 
 
     if isinstance(io, str):

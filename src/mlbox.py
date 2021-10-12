@@ -3,16 +3,14 @@ from collections import defaultdict
 import matplotlib.pyplot as plt 
 import numpy as np 
 import os
-from numpy.lib.function_base import interp
 import pandas as pd
-import sklearn
 
 from sklearn.model_selection import StratifiedKFold, cross_val_score
 import sklearn.metrics as metrics 
 from sklearn.base import clone as sklearn_clone
-from sklearn.utils import compute_class_weight
 
 import dataset as ds, sklearn_skillz as ssz
+import plotting
 import utils 
 import logging
 logging.basicConfig(level=utils.logginglevel)
@@ -35,8 +33,6 @@ class PipelinesEvaluator:
         self.__evaluations.clear()
         self.__avg_rocs.clear()
 
-
-
     def plot_averaged_roc(self, output_folder):
         mean_fpr = np.linspace(0, 1, 100)
 
@@ -46,7 +42,6 @@ class PipelinesEvaluator:
 
             mean_tpr = np.mean(tprs, axis=0).ravel()
             std_tpr = np.std(tprs, axis=0).ravel()
-
             tprs_upper, tprs_lower = np.minimum(mean_tpr + std_tpr, 1), np.maximum(mean_tpr - std_tpr, 0)
             mean_fpr = np.linspace(0, 1, 100)
 
@@ -84,19 +79,24 @@ class PipelinesEvaluator:
         return len(self.__evaluations)
 
     def evaluate(self, pipelines, output_folder, validation_sets: list = list()):
+        """ Return a pair of dictionaries """
         tester = PipelineEvaluator(pipelines, self.__targets, output_folder)
-        dictreturned = tester.test_cv(self.__dataset, self.__n_folds, validation_sets=validation_sets)
+        validation_results = tester.test_cv(self.__dataset, self.__n_folds, validation_sets=validation_sets)
+        test_results = validation_results.pop(0)
+        
+        if False:
+            # samples_report, rocs_info = tester.test_cv(self.__dataset, self.__n_folds, validation_sets=validation_sets)
+            samples_report_df = dictreturned.get("samples_report")
+            rocs_info = dictreturned.get("avg_rocs")
+            val_df = pd.DataFrame( dictreturned.get("validated") )
 
-        # samples_report, rocs_info = tester.test_cv(self.__dataset, self.__n_folds, validation_sets=validation_sets)
-        samples_report_df = dictreturned.get("df")
-        rocs_info = dictreturned.get("avg_rocs")
-        val_df = pd.DataFrame( dictreturned.get("validated") )
-
-
+        # tester.visualize("")
+        tester.process_feature_importances()
 
         # samples_report.to_csv(os.path.join(output_folder, "samples_report.tsv"), sep="\t")
-        tester.visualize("filename_prefix") #### XXX to fix -- remove feature stuff from here 
-        metrics_report = tester.metrics() 
+        #tester.visualize("filename_prefix") #### XXX to fix -- remove feature stuff from here 
+        # metrics_report = tester.metrics() 
+        # print(metrics_report)
 
         # print("METRICS REPORT")
         # print(metrics_report)
@@ -106,19 +106,27 @@ class PipelinesEvaluator:
         #     os.path.join(output_folder, "classification_report.tsv"), 
         #     sep="\t", float_format="%.3g"
         # )
+
+        #chissà a che serve.... 
         self.__evaluations.append(tester)
+        return test_results, validation_results
 
-        for pipeline, rocs_data in rocs_info.items(): 
-            pipeline_name = PipelineEvaluator.get_pipeline_name(pipeline)
-            self.__avg_rocs[pipeline_name].append(rocs_data)
+        # raise Exception("come mango")
 
-        return dict(
-            metrics_report=metrics_report, 
-            samples_report=samples_report_df,
-            validation_reports=val_df)
+        if False:
+            for pipeline, rocs_data in rocs_info.items(): 
+                pipeline_name = PipelineEvaluator.get_pipeline_name(pipeline)
+                self.__avg_rocs[pipeline_name].append(rocs_data)
+
+            return dict(
+                metrics_report=metrics_report, 
+                samples_report=samples_report_df,
+                validation_reports=val_df)
 
 
         # return metrics_report, val_df 
+
+        return 
 
 
 
@@ -137,11 +145,6 @@ class PipelineEvaluator:
         #attribute to get the averaged ROC over multiple runs 
         self.__avg_roc = dict() 
 
-        ############### XXX - to fix: UPDATE SKLEARN to 1.0
-        try: 
-            self.plot_roc_curve = metrics.RocCurveDisplay.from_estimator 
-        except AttributeError:
-            self.plot_roc_curve = metrics.plot_roc_curve
 
 
     
@@ -169,123 +172,235 @@ class PipelineEvaluator:
         self.__true_y.clear()
         self.__avg_roc.clear()
 
-    def __test_clf(self, clf, dataset: ds.BinaryClfDataset, folds: list, validation_sets: list) -> dict:
-        def test_on_validation(trained_clf, validation_sets: list(), n_fold: int) -> list: #return a list of dicts
-            """ Return a list having a dict (enriched classification report) for each validation set evaluated """
-            clf, reports = trained_clf, list() 
-            clf_name = PipelineEvaluator.get_pipeline_name(clf).replace("scaler_", "")
+    # def __test_clf(self, clf, dataset: ds.BinaryClfDataset, folds: list, validation_sets: list) -> dict:
+    #     def test_on_validation(trained_clf, validation_sets: list(), n_fold: int) -> list: #return a list of dicts
+    #         """ Return a list having a dict (enriched classification report) for each validation set evaluated """
+    #         clf, reports = trained_clf, list() 
+    #         clf_name = PipelineEvaluator.get_pipeline_name(clf).replace("scaler_", "")
             
-            for vs in validation_sets:
-                reports.append( utils.nice_classification_report(
-                    vs.target, clf.predict(vs.data), vs.target_labels) )
-                reports[-1]["validation_set"] = vs.name
-                reports[-1]["n_fold"] = n_fold
-                reports[-1]["clf"] = clf_name
-                reports[-1]["AUC"] = metrics.roc_auc_score(
-                    vs.target, clf.predict_proba(vs.data)[:, 1])
+    #         for vs in validation_sets:
+    #             reports.append( utils.nice_classification_report(
+    #                 vs.target, clf.predict(vs.data), vs.target_labels) )
+    #             reports[-1]["validation_set"] = vs.name
+    #             reports[-1]["n_fold"] = n_fold
+    #             reports[-1]["clf"] = clf_name
+    #             reports[-1]["AUC"] = metrics.roc_auc_score(
+    #                 vs.target, clf.predict_proba(vs.data)[:, 1])
             
-            return reports 
+    #         return reports 
 
-
-        dict_roc = defaultdict(list)
-        valids = list() #reports of all validation sets in k fold
-
-        mean_fpr = np.linspace(0, 1, 100)
-        fig, ax = plt.subplots()
         
-        #######XXX AAA riscrivere facendo un roc plot per ogni validation set + il test set eheh
 
+    #     dict_roc = defaultdict(list)
+    #     valids = list() #reports of all validation sets in k fold
 
-        for n_fold, (idx_train, idx_test) in enumerate(folds):
-            X_train, X_test = dataset.data.iloc[idx_train], dataset.data.iloc[idx_test]
-            y_train, y_test = dataset.target[idx_train], dataset.target[idx_test]
+    #     mean_fpr = np.linspace(0, 1, 100)
+    #     fig, ax = plt.subplots()
+        
+    #     #######XXX AAA riscrivere facendo un roc plot per ogni validation set + il test set eheh
+    #     for n_fold, (idx_train, idx_test) in enumerate(folds):
+    #         X_train, X_test = dataset.data.iloc[idx_train], dataset.data.iloc[idx_test]
+    #         y_train, y_test = dataset.target[idx_train], dataset.target[idx_test]
             
-            self.__predictions[clf].extend( clf.fit(X_train, y_train).predict(X_test) )
+    #         self.__predictions[clf].extend( clf.fit(X_train, y_train).predict(X_test) )
 
-            viz = self.plot_roc_curve(clf, X_test, y_test, name="", alpha=0.3, ax=ax)
-            interp_trp = np.interp(mean_fpr, viz.fpr, viz.tpr)
-            interp_trp[0] = 0.0
+    #         viz = metrics.RocCurveDisplay.from_estimator (clf, X_test, y_test, alpha=0.3, ax=ax)
+    #         interp_trp = np.interp(mean_fpr, viz.fpr, viz.tpr)
+    #         interp_trp[0] = 0.0
 
-            dict_roc["tprs"].append(interp_trp)
-            dict_roc["aucs"].append(viz.roc_auc)
+    #         dict_roc["tprs"].append(interp_trp)
+    #         dict_roc["aucs"].append(viz.roc_auc)
 
-            f_selector = ssz.FeatureSelector(clf, dataset.data.columns)
-            _ = f_selector.get_selected_features()
-            self.__features[clf][f"fold_{n_fold + 1}"] = f_selector.get_classifier_features()
+    #         f_selector = ssz.FeatureSelector(clf, dataset.data.columns)
+    #         _ = f_selector.get_selected_features()
+    #         self.__features[clf][f"fold_{n_fold + 1}"] = f_selector.get_classifier_features()
 
-            valids.extend( test_on_validation(clf, validation_sets, n_fold + 1) )
+    #         valids.extend( test_on_validation(clf, validation_sets, n_fold + 1) )
 
-        ax.plot([0, 1], [0, 1], linestyle='--', lw=2, color='r',
-            label='Chance', alpha=.8)
+    #     ax.plot([0, 1], [0, 1], linestyle='--', lw=2, color='r',
+    #         label='Chance', alpha=.8)
 
-        tprs, aucs = [dict_roc.get(k) for k in ("tprs", "aucs")]
-        std_auc = np.std(aucs)
-        mean_tpr = np.mean(tprs, axis=0)
-        mean_tpr[-1] = 1
-        std_tpr = np.std(tprs, axis=0)
-        mean_auc = metrics.auc(mean_fpr, mean_tpr)
-        tprs_upper, tprs_lower = np.minimum(mean_tpr + std_tpr, 1), np.maximum(mean_tpr - std_tpr, 0)
+    #     tprs, aucs = [dict_roc.get(k) for k in ("tprs", "aucs")]
+    #     std_auc = np.std(aucs)
+    #     mean_tpr = np.mean(tprs, axis=0)
+    #     mean_tpr[-1] = 1
+    #     std_tpr = np.std(tprs, axis=0)
+    #     mean_auc = metrics.auc(mean_fpr, mean_tpr)
+    #     tprs_upper, tprs_lower = np.minimum(mean_tpr + std_tpr, 1), np.maximum(mean_tpr - std_tpr, 0)
 
-        ax.plot(mean_fpr, mean_tpr, color="b", 
-            label=fr'(AUC = {mean_auc:.2f} $\pm$ {std_auc:.2f})',
-            lw=2, alpha=.8)
-        ax.fill_between(mean_fpr, tprs_lower, tprs_upper, color="grey", 
-                        alpha=0.2, label=r"$\pm$ 1 std. dev.")
-        ax.set(
-            xlim=[-0.05, 1.05], 
-            ylim=[-0.05, 1.05], 
-            title=f"ROC curve of {PipelineEvaluator.get_pipeline_name(clf)}")
-        ax.legend(loc="lower right")
+    #     ax.plot(mean_fpr, mean_tpr, color="b", 
+    #         label=fr'(AUC = {mean_auc:.2f} $\pm$ {std_auc:.2f})',
+    #         lw=2, alpha=.8)
+    #     ax.fill_between(mean_fpr, tprs_lower, tprs_upper, color="grey", 
+    #                     alpha=0.2, label=r"$\pm$ 1 std. dev.")
+    #     ax.set(
+    #         xlim=[-0.05, 1.05], 
+    #         ylim=[-0.05, 1.05], 
+    #         title=f"ROC curve of {PipelineEvaluator.get_pipeline_name(clf)}")
+    #     ax.legend(loc="lower right")
 
-        # plt.savefig("fregna.pdf")
-        # plt.show()
-        plt.close(fig) 
+    #     # plt.savefig("fregna.pdf")
+    #     plt.show()
+    #     plt.close(fig) 
+    #     # raise Exception()
 
-        return dict(mean_auc = mean_auc, mean_tpr = mean_tpr, valids = valids)
+    #     return dict(mean_auc = mean_auc, mean_tpr = mean_tpr, valids = valids)
 
 
     def test_cv(self, dataset: ds.BinaryClfDataset, n_splits=10, validation_sets: list = list()) -> dict:
-        self.__init()
-        
+        self.__init() 
+
         ##define folds for the current execution
         stratkfold = StratifiedKFold(n_splits=n_splits, shuffle=True)
         folds = list( stratkfold.split( dataset.data, dataset.target ))
-        self.__true_y = sum([list(dataset.target[idx_test]) for _, idx_test in folds], [])
+        #build y values and index of dataset following the ordering given by folds
+        index = list()
+        for _, idx_test in folds:
+            self.__true_y.extend( list(dataset.target[idx_test]) )
+            index.extend( list(dataset.data.iloc[idx_test].index) )
 
-        validation_data = list()
+        #define dictionaries for save valuable data 
+        #key: clf name, value: magic plots (test set + validation sets)
+        cv_results = dict() 
+        cv_results_test = dict()
 
         for clf in self.__pipelines:
-            dictret = self.__test_clf(clf, dataset, folds, validation_sets)
+            #run n fold cv for each classifier 
+            res_test, res_val = self.test_clf_in_cv(
+                    clf, dataset, folds, validation_sets)
+            #save results from test and validations 
+            cv_results_test.update( res_test )
+            cv_results.update( res_val )
+            
+        #build sample report for training/test set 
+        test_report = plotting.SamplesReport(index, self.__true_y)
 
-            self.__rocs[clf] = dictret.get("mean_auc")
-            self.__avg_roc[clf] = dictret.get("mean_tpr")
-            validation_data.extend( dictret.get("valids") )
+        for clf, plot in cv_results_test.items():
+            test_report.put_plot(clf, plot)
+
+        #now do the same stuff but on validation sets...
+        validation_dict = {
+            vs.name: vs for vs in validation_sets  }
+
+        # key: (clf, validation), value: samples report 
+        # key = 0 for results in training/test
+        samples_reports = {  0: test_report   }
+        #iterate over classifiers
+        for clf, plot_validations in cv_results.items():
+            #iterate over results (over) the same validation set
+            for vname, plot in plot_validations.items():
+                vset = validation_dict.get(vname)
+                curr = samples_reports[(clf, vname)] = plotting.SamplesReport(vset.data.index, vset.target)
+                curr.save_plot(plot) #save metrics 
+                #iterate over classifier results in the N folds
+                for i, y_pred_vector in enumerate(plot.predictions):
+                    #add prediction using the classifier of the i-th fold 
+                    curr.put_column(f"{clf}_{i+1}", y_pred_vector)
+
+        return samples_reports
 
 
-        ##dataframe whose columns are the predictions of the tested classifiers
-        ##and the rows are the tested examples
-        index = sum([list(dataset.data.iloc[idxs].index) for _, idxs in folds], [])
-        map_to_label = lambda x: self.__target_labels[x]
+    # def __test_cv(self, dataset: ds.BinaryClfDataset, n_splits=10, validation_sets: list = list()) -> dict:
+    #     self.__init()
+        
+    #     ##define folds for the current execution
+    #     stratkfold = StratifiedKFold(n_splits=n_splits, shuffle=True)
+    #     folds = list( stratkfold.split( dataset.data, dataset.target ))
+    #     #compose y target of dataset following the folds ordering 
+    #     self.__true_y = sum([list(dataset.target[idx_test]) for _, idx_test in folds], [])
 
-        ##build sample df with clf predictions 
-        df = pd.DataFrame(
-            index = index,
-            data = {
-                PipelineEvaluator.get_pipeline_name(pipeline): list(map(map_to_label, y)) \
-                    for pipeline, y in self.__predictions.items()
-            })
-        #counts how many times each element has been predicted to the correct class
-        true_y = list(map(map_to_label, self.__true_y))
-        df["right_pred"] = [list(row).count(y) for row, y in zip(df.values, true_y)]
-        #add correct class column
-        df["true_y"] = true_y
+    #     validation_data = list()
 
-        dict2return = dict(
-            df = df.sort_values(by=["true_y", "right_pred"], ascending=(True, False)), 
-            avg_rocs = self.__avg_roc, 
-            validated = validation_data)
-        return dict2return
+    #     for clf in self.__pipelines:
+    #         dictret = self.__test_clf(clf, dataset, folds, validation_sets)
 
+    #         self.__rocs[clf] = dictret.get("mean_auc")
+    #         self.__avg_roc[clf] = dictret.get("mean_tpr")
+    #         validation_data.extend( dictret.get("valids") )
+
+    #     ##dataframe whose columns are the predictions of the tested classifiers
+    #     ##and the rows are the tested examples
+    #     index = sum([list(dataset.data.iloc[idxs].index) for _, idxs in folds], [])
+    #     map_to_label = lambda x: self.__target_labels[x]
+
+    #     ##build sample df with clf predictions 
+    #     df = pd.DataFrame(
+    #         index = index,
+    #         data = {
+    #             PipelineEvaluator.get_pipeline_name(pipeline): list(map(map_to_label, y)) \
+    #                 for pipeline, y in self.__predictions.items()
+    #         })
+    #     #counts how many times each element has been predicted to the correct class
+    #     true_y = list(map(map_to_label, self.__true_y))
+    #     df["right_pred"] = [list(row).count(y) for row, y in zip(df.values, true_y)]
+    #     #add correct class column
+    #     df["true_y"] = true_y
+
+    #     dict2return = dict(
+    #         samples_report = df.sort_values(by=["true_y", "right_pred"], ascending=(True, False)), 
+    #         avg_rocs = self.__avg_roc, 
+    #         validated = validation_data)
+    #     return dict2return
+
+
+
+
+    def test_clf_in_cv(self, clf, dataset: ds.BinaryClfDataset, folds: list, validation_sets: list):
+        clf_name = PipelineEvaluator.get_pipeline_name(clf).replace("scaler_", "")
+        magic_plots = dict()
+        # logging.info(f"Evaluating {clf_name}")
+
+        #fit a classifier for each fold 
+        trained_clfs = [sklearn_clone(clf).fit(
+            dataset.data.iloc[idx_train], dataset.target.iloc[idx_train]) \
+                for idx_train, _ in folds] 
+
+        #get feature importances from each trained classifier 
+        for n_fold, clf in enumerate(trained_clfs, 1):
+            f_selector = ssz.FeatureSelector(clf, dataset.data.columns)
+            f_selector.get_selected_features()
+            self.__features[clf][f"fold_{n_fold}"] = f_selector.get_classifier_features()
+
+        # test each classifier over the corresponding test set.
+        plot_test = plotting.MagicROCPlot(clf_name, "Test Set")
+
+        for clf, (_, idx_test) in zip(trained_clfs, folds):
+            #build index following the ordering given by CV
+            # index_test_set.extend( dataset.data.iloc[idx_test].index )
+            # true_y.extend( dataset.target.iloc[idx_test] )
+            #run classifier against test set, saving predictions
+            plot_test.run(
+                clf,
+                dataset.data.iloc[idx_test], 
+                dataset.target.iloc[idx_test])
+
+        plot_test.close()
+
+        #getting plots of validation sets:
+        # test each validation set against each trained classifier 
+        for validation_set in validation_sets:
+            magic_plots[validation_set.name] = plotting.MagicROCPlot(clf_name, validation_set.name)
+
+            for clf in trained_clfs:
+                magic_plots[validation_set.name]\
+                    .run(clf, validation_set.data, validation_set.target)
+
+            magic_plots[validation_set.name].close()
+
+        #return a pair of dictionaries: (test set stuff, validation set stuff)
+        return (
+            { clf_name: plot_test},     #plot info for test set 
+            { clf_name: magic_plots })  #plot info for validation sets
+
+
+    def process_feature_importances(self):
+        # for clf, features in self.__features.items():
+        for features in self.__features.values():
+            # pipeline_name = PipelineEvaluator.get_pipeline_name(clf)
+            #get the mean score evaluating nans as 0 
+            features["mean"] = features.fillna(0).mean(axis=1).sort_values()
+            # save dataframe ranking features from the best to the worse (based on average score)
+            features.sort_values(by="mean", ascending=False)
 
     def visualize(self, file_prefix):
         feature_folder = utils.make_folder(self.__output_folder, "feature_ranking")
@@ -323,11 +438,12 @@ class PipelineEvaluator:
             sorted_features = list(pd.Series(data = means).sort_values(ascending=False).index)
             ranking_list.append(pd.Series(data = sorted_features, name = pipeline_name))
 
-        #write feature ranking of each pipeline 
-        x = pd.concat(ranking_list, axis=1, keys=[s.name for s in ranking_list]).to_csv(
-            path_or_buf = os.path.join(feature_folder, "best_features_per_classifier.csv"), 
-            sep="\t"
-        )
+
+        # #write feature ranking of each pipeline 
+        # x = pd.concat(ranking_list, axis=1, keys=[s.name for s in ranking_list]).to_csv(
+        #     path_or_buf = os.path.join(feature_folder, "best_features_per_classifier.csv"), 
+        #     sep="\t"
+        # )
 
 
 

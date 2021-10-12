@@ -8,6 +8,7 @@ from sklearn.linear_model import \
     LogisticRegression, \
     SGDClassifier, \
     LassoCV
+from sklearn.naive_bayes import GaussianNB
 from sklearn.svm import LinearSVC
 from sklearn.ensemble import \
     RandomForestClassifier, \
@@ -85,9 +86,8 @@ class ClassifiersToEvaluate(enum.Enum):
     LOGISTIC_REGRESSION = ("log_reg", LogisticRegression)
     RANDOM_FOREST = ("r_forest", RandomForestClassifier)
     GRADIENT_BOOSTING = ("g_boost", GradientBoostingClassifier)
-#    LINEAR_SVM = ("lin_SVM", LinearSVC) ### no convergence
-#    SDG = ("sdg", SGDClassifier)       ### no convergence 
-
+    GAUSSIAN_NAIVE_BAYES = ("gaussian_nb", GaussianNB)
+    
 
 class FeatureSelectionHyperParameters:
     @classmethod
@@ -156,7 +156,8 @@ class ClassifiersHyperParameters:
             LinearSVC: cls.svmParameters, 
             RandomForestClassifier: cls.randomForestParameters, 
             GradientBoostingClassifier: cls.gradientBoostingParameters, 
-            SGDClassifier: cls.sdgClassifierParameters
+            SGDClassifier: cls.sdgClassifierParameters,
+            GaussianNB: cls.gaussianNBClassifierParameters
         }
         # get estimator's hyperparameters
         estimator_t = type(pipeline[-1])
@@ -166,6 +167,12 @@ class ClassifiersHyperParameters:
 
         return {**fs_hp, **clf_hp}
 
+
+    @classmethod
+    def gaussianNBClassifierParameters(cls):
+        return dict(
+            gnb = [GaussianNB()]
+        )
 
 
     @classmethod
