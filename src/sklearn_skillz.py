@@ -86,7 +86,7 @@ class ClassifiersToEvaluate(enum.Enum):
     LOGISTIC_REGRESSION = ("log_reg", LogisticRegression)
     RANDOM_FOREST = ("r_forest", RandomForestClassifier)
     GRADIENT_BOOSTING = ("g_boost", GradientBoostingClassifier)
-    GAUSSIAN_NAIVE_BAYES = ("gaussian_nb", GaussianNB)
+    # GAUSSIAN_NAIVE_BAYES = ("gaussian_nb", GaussianNB)
     
 
 class FeatureSelectionHyperParameters:
@@ -157,7 +157,7 @@ class ClassifiersHyperParameters:
             RandomForestClassifier: cls.randomForestParameters, 
             GradientBoostingClassifier: cls.gradientBoostingParameters, 
             SGDClassifier: cls.sdgClassifierParameters,
-            GaussianNB: cls.gaussianNBClassifierParameters
+            # GaussianNB: cls.gaussianNBClassifierParameters
         }
         # get estimator's hyperparameters
         estimator_t = type(pipeline[-1])
@@ -168,11 +168,11 @@ class ClassifiersHyperParameters:
         return {**fs_hp, **clf_hp}
 
 
-    @classmethod
-    def gaussianNBClassifierParameters(cls):
-        return dict(
-            gnb = [GaussianNB()]
-        )
+    # @classmethod
+    # def gaussianNBClassifierParameters(cls):
+    #     return dict(
+    #         gnb = [GaussianNB()]
+    #     )
 
 
     @classmethod

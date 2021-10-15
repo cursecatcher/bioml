@@ -1,4 +1,5 @@
 import argparse, os
+from ast import parse
 import dataset as ds 
 import pandas as pd 
 import logging
@@ -38,16 +39,21 @@ def nice_classification_report(y_true, y_pred, target_names: list) -> dict:
 
 def get_parser(prog: str) -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog)
+    ####################### IO 
     #parent output folder where to save all results
-    parser.add_argument("-o", "--outfolder", type=str, required=True)
-    parser.add_argument("-i", "--input_data", type=str, required=True)
-    parser.add_argument("-m", "--more_data", type=str, required=False)
+    parser.add_argument("-o", "--outfolder", type=str, required=True)       #output folder (to be created)
+    parser.add_argument("-i", "--input_data", type=str, required=True)      #input dataset 
+    parser.add_argument("-m", "--more_data", type=str, required=False)      #additional data to integrate in the input dataset
+    parser.add_argument("-f", "--feature_lists", type=str, nargs="+")       #list of feature lists 
+    parser.add_argument("-v", "--validation_sets", type=str, nargs="*")     #list of validation sets
+    ###################### PREDICTION 
     #target covariate to predict - only categorical features 
-    parser.add_argument("-t", "--target", type=str, required=True)
-    #restrict target covariate to a binary case
-    parser.add_argument("-l", "--labels", type=str, nargs=2)
-    parser.add_argument("-f", "--feature_lists", type=str, nargs="+")
-    parser.add_argument("--trials", type=int, default=1)
-    parser.add_argument("--ncv", type=int, default=10)
+    parser.add_argument("-t", "--target", type=str, required=True)          #name of the (categorical) feature to be predicted 
+    parser.add_argument("-l", "--labels", type=str, nargs=2)                #pair of labels (neg label, pos label)
+    parser.add_argument("-p", "--pos_labels", type=str, nargs="+")          #labels to be considered as positive     
+    parser.add_argument("-n", "--neg_labels", type=str, nargs="+")          #labels to be considered as negative
+    ###################### 
+    parser.add_argument("--trials", type=int, default=1)                    #num of runs to be done 
+    parser.add_argument("--ncv", type=int, default=10)                      #number of folds to be used during cross validation 
 
     return parser 

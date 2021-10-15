@@ -181,11 +181,12 @@ class AldoRitmoClassificazione:
 
 if __name__ == "__main__":
     parser = utils.get_parser("classification")
-    parser.add_argument("-v", "--validation_sets", type=str, nargs="*")
     args = parser.parse_args() 
 
+    
     #load dataset 
-    dataset = ds.BinaryClfDataset(args.input_data, args.target, args.labels)
+    # dataset = ds.BinaryClfDataset(args.input_data, args.target, args.labels)
+    dataset = ds.BinaryClfDataset(args.input_data, args.target, allowed_values=args.labels, pos_labels=args.pos_labels, neg_labels=args.neg_labels )
     dataset.name = "training set"
     if args.more_data:
         dataset.load_data(args.more_data)
@@ -201,9 +202,11 @@ if __name__ == "__main__":
     if args.validation_sets:
         for vs in args.validation_sets:
             logging.info(f"Loading validation set: {vs}")
-            validation_sets.append( ds.BinaryClfDataset( vs, args.target, args.labels ) )
-            validation_sets[-1].name = os.path.basename(vs)
-    
+            # curr_vset = ds.BinaryClfDataset( vs, args.target, args.labels )
+            curr_vset = ds.BinaryClfDataset( vs, args.target, allowed_values=args.labels, pos_labels=args.pos_labels, neg_labels=args.neg_labels )
+            curr_vset.name = os.path.basename(vs)
+            validation_sets.append( curr_vset )
+
     
     #process one feature list at the time 
     for fl in feature_lists:

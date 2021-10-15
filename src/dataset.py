@@ -126,8 +126,37 @@ class Dataset:
 
 
 class BinaryClfDataset(Dataset):
+
+    def __init__(self, io, target_cov: str = None, allowed_values: tuple = None, pos_labels: tuple = tuple(), neg_labels: tuple = tuple()):
+        super().__init__(io=io)
+
+        self.target = None 
+        self.encoding = None 
+        self.target_labels = None 
+
+        if target_cov:
+            if allowed_values is None:
+                assert pos_labels and neg_labels # 
+                allowed_values = tuple(list(pos_labels) + list(neg_labels))
+                #encode more than 2 labels mapping to [0, 1]
+                self.encoding = { label: int(label in pos_labels) for label in allowed_values }
+            else:
+                self.encoding = { label: encoding for encoding, label in enumerate(allowed_values) }
+            
+            mask = self.df[target_cov].isin(allowed_values)
+            df_masked = self.df[mask]
+            self.target = df_masked[target_cov].replace( self.encoding )
+            self.df = df_masked.drop( columns=[target_cov] )
+            self.target_labels = allowed_values
+            if len( self.encoding ) > 2:
+                self.target_labels = ["_".join(neg_labels), "_".join(pos_labels) ]
+                #rebuild encoding mapping from new target labels to [0, 1]
+                self.encoding = { label: i for i, label in enumerate(self.target_labels) }
+
+            self.encode_features()
+            self.fix_missing() 
     
-    def __init__(self, io, target_cov: str = None, allowed_values : tuple = None) -> None:
+    def __init(self, io, target_cov: str = None, allowed_values : tuple = None) -> None:
         super().__init__(io)
 
         self.target = None 

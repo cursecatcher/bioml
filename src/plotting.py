@@ -57,7 +57,7 @@ class MagicROCPlot:
                 for y_prob in self.__predictions ]
 
 
-    def run(self, clf, X, y) -> np.array:
+    def run(self, clf, X, y, binary_labels) -> np.array:
         if self.__fig is None and self.__ax is None:
             self.__fig, self.__ax = plt.subplots()
 
@@ -72,8 +72,7 @@ class MagicROCPlot:
         y_prob = self.__predictions[-1]
         y_predicted = np.array([int(x > 0.5) for x in y_prob])
 
-        report = utils.nice_classification_report(
-            y, y_predicted, ["CRC", "Healthy"])
+        report = utils.nice_classification_report( y, y_predicted, binary_labels ) 
         report["validation_set"] = self.__dataname
         report["clf"] = self.__clfname
         report["n_fold"] = len(self.__reports) + 1 #AUTO increment

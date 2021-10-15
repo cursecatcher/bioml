@@ -8,6 +8,7 @@ import pandas as pd
 from sklearn.model_selection import StratifiedKFold, cross_val_score
 import sklearn.metrics as metrics 
 from sklearn.base import clone as sklearn_clone
+from sklearn.utils import validation
 
 import dataset as ds, sklearn_skillz as ssz
 import plotting
@@ -372,7 +373,7 @@ class PipelineEvaluator:
             plot_test.run(
                 clf,
                 dataset.data.iloc[idx_test], 
-                dataset.target.iloc[idx_test])
+                dataset.target.iloc[idx_test], dataset.target_labels)
 
         plot_test.close()
 
@@ -383,7 +384,7 @@ class PipelineEvaluator:
 
             for clf in trained_clfs:
                 magic_plots[validation_set.name]\
-                    .run(clf, validation_set.data, validation_set.target)
+                    .run(clf, validation_set.data, validation_set.target, validation_set.target_labels)
 
             magic_plots[validation_set.name].close()
 

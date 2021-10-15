@@ -51,7 +51,7 @@ class FeaturesSearcher:
             final_df = pd.concat(final_df)\
                 .set_index("clf")\
                 .drop(columns=["validation_set"])
-            print(final_df)
+            # print(final_df)
         
 
         measures = ["AUC"]
@@ -188,7 +188,7 @@ if __name__ == "__main__":
     parser = utils.get_parser("feature selection")
     args = parser.parse_args()
 
-    dataset = ds.BinaryClfDataset(args.input_data, args.target, args.labels)
+    dataset = ds.BinaryClfDataset(args.input_data, args.target, args.labels, pos_labels=args.pos_labels, neg_labels=args.neg_labels)
     if args.more_data:
         dataset.load_data(args.more_data)
 
