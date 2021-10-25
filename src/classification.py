@@ -181,7 +181,11 @@ class AldoRitmoClassificazione:
 
 if __name__ == "__main__":
     parser = utils.get_parser("classification")
+    parser.add_argument("--vsize", type=float, default=0.1)
     args = parser.parse_args() 
+
+    if not (0 < args.vsize < 1):
+        raise Exception("--vsize parameter value must be in (0, 1)")
 
     
     #load dataset 
@@ -195,14 +199,14 @@ if __name__ == "__main__":
     feature_lists = utils.load_feature_lists( args.feature_lists )
 
     #load validation sets 
-    dataset, validation_data = dataset.extract_validation_set(0.1)
+    dataset, validation_data = dataset.extract_validation_set(args.vsize)
     validation_data.name = os.path.basename(args.input_data)  #set validation name as the input dataset used for training 
     validation_sets = [ validation_data ]
     
     if args.validation_sets:
         for vs in args.validation_sets:
             logging.info(f"Loading validation set: {vs}")
-            # curr_vset = ds.BinaryClfDataset( vs, args.target, args.labels )
+            #TODO - load from folders 
             curr_vset = ds.BinaryClfDataset( vs, args.target, allowed_values=args.labels, pos_labels=args.pos_labels, neg_labels=args.neg_labels )
             curr_vset.name = os.path.basename(vs)
             validation_sets.append( curr_vset )
