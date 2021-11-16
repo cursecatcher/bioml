@@ -61,6 +61,8 @@ class MagicROCPlot:
         if self.__fig is None and self.__ax is None:
             self.__fig, self.__ax = plt.subplots()
 
+        logging.debug(f"SHAPES - {X.shape} - {y.shape}")
+
         viz = metrics.RocCurveDisplay.from_estimator(
             clf, X, y, alpha=0.3, ax=self.__ax)
         interpr_tpr = np.interp(self.__mean_fpr, viz.fpr, viz.tpr)

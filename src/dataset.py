@@ -1,10 +1,8 @@
 
 import pandas as pd
-import os 
-
-import utils 
+import os
 import logging
-logging.basicConfig(level=utils.logginglevel)
+logging.basicConfig(level=logging.INFO)
 
 
 class FeatureList:
@@ -18,7 +16,6 @@ class FeatureList:
         col = df.columns[0]
         self.__name = col.strip().replace(" ", "_")
         self.__features = df[col]
-
 
     @property
     def name(self) -> str:
@@ -61,6 +58,10 @@ class Dataset:
             assert isinstance(self.df, pd.DataFrame)
 
     @property
+    def shape(self):
+        return self.data.shape
+
+    @property
     def data(self) -> pd.DataFrame:
         return self.df 
     
@@ -73,6 +74,10 @@ class Dataset:
         self.__name = n
     
 
+    def merge(self, datasets: list):
+        assert type(datasets) in (list, tuple)
+        df = pd.concat( [self.data] + [d.data for d in datasets])
+        return Dataset( io = df )
 
 
     def load_data(self, io):
@@ -156,47 +161,37 @@ class BinaryClfDataset(Dataset):
             self.encode_features()
             self.fix_missing() 
     
-    def __init(self, io, target_cov: str = None, allowed_values : tuple = None) -> None:
-        super().__init__(io)
-
-        self.target = None 
-        self.encoding = None 
-        self.target_labels = None 
-
-        if target_cov:
-            if allowed_values is None:
-                allowed_values = self.df[target_cov].unique()
-                if allowed_values.size != 2:
-                    raise MultipleLabelsException(allowed_values)
-                    
-            mask = self.df[target_cov].isin(allowed_values)
-            df_masked = self.df[mask]
-
-            self.encoding = {label: encoding for encoding, label in enumerate(allowed_values)}
-            self.target = df_masked[target_cov].replace( self.encoding )
-            self.df = df_masked.drop( columns=[target_cov] )
-            self.target_labels = allowed_values
-
-            self.encode_features()
-            self.fix_missing()
+    @property
+    def shape(self):
+        return (super().shape, self.target.shape)
 
 
-    def extract_validation_set(self, size: float) -> tuple:
+    def extract_validation_set(self, size: float, only: str) -> tuple:
         """ Return a pair of dataset (training, validation) """
         logging.info(f"Creating validation set of {self.name} w/ {size} size")
 
-        valid = self.__copy(df = pd.concat([
-            df.sample(frac=size) for _, df in self.data.groupby(self.target)
-        ]))
-        training = pd.concat([self.data, valid.data]).drop_duplicates(keep=False)
-        training = self.__copy(df = training)
-        
+
+        if only.lower() == "all": 
+            tmp = [ df.sample(frac=size) for _, df in self.data.groupby(self.target) ]
+            valid = self.__copy(df = pd.concat( tmp ))
+        elif only in self.target_labels:
+            target_samples = self.target[ self.target == self.encoding[only] ].index
+            valid = self.__copy(df = self.data.loc[ target_samples ].sample(frac=size))
+            
+        else:
+            raise InvalidBioMLOperationException( f"--only {only} doesn't work like that. " ) 
+
+        training = self.__copy(df = pd.concat(
+            [self.data, valid.data]).drop_duplicates(keep=False))
+
+        logging.debug(f"Training/validation {size} => {training.shape} - {valid.shape}")
+
         return training, valid 
     
 
     def extract_subdata(self, features: FeatureList):
         if features is None:
-            logging.info(f"Extract_subdata(None) => returning self {id(self)}")
+            logging.debug(f"Extract_subdata(None) => returning self {id(self)}")
             return self 
 
         subdata = None 
@@ -205,10 +200,9 @@ class BinaryClfDataset(Dataset):
             raise Exception(f"Unsupported type: {type(features)}")
 
         try:
-            subdata = self.__copy(features) 
+            subdata = self.__copy(features = features) 
         except KeyError: #cannot find features is df 
-            # print("Cannot find features in matrix....")
-            raise Exception(f"Cannot extract features {features.features} from matrix")
+            raise Exception(f"Cannot extract features from matrix:\n{features.features.tolist()}")
 
         assert isinstance(subdata, BinaryClfDataset)
         return subdata
@@ -217,7 +211,11 @@ class BinaryClfDataset(Dataset):
     def __copy(self, features: FeatureList = None, df: pd.DataFrame = None):
         new_df = df 
         if new_df is None:
+            # print(self.df.columns)
             new_df = self.df[features.features] if features else self.df 
+        elif features:
+            new_df = new_df[features.features]
+            logging.debug(f"Feature list ignored: {features.features}")
 
         bcd = BinaryClfDataset(new_df)
         bcd.encoding = self.encoding
@@ -227,6 +225,19 @@ class BinaryClfDataset(Dataset):
         
         return bcd 
         
+    def merge(self, dataset):
+        assert type(dataset) is BinaryClfDataset
+
+        intersect = set(self.data.index).intersection(dataset.data.index)
+        if len( intersect ) > 0:
+            logging.warning(f"Doubled examples: {intersect}")
+            raise NotImplementedError("Merging non-independent dataset is currently unsupported.")
+
+        self.df = pd.concat([self.df] + [dataset.df])
+        self.target = pd.concat([self.target] + [dataset.target])
+
+        return self 
+
 
 
 
@@ -242,6 +253,9 @@ class InvalidFeatureListException(Exception):
         message = f"Feature lists must have a single column; {filename} has more than one column."
         super().__init__(message)
 
+class InvalidBioMLOperationException(Exception):
+    def __init__(self, message) -> None:
+        super().__init__(message)
 
 
 
@@ -264,7 +278,7 @@ def load_data(io, header=True, index=True):
 
         if extfile == "xlsx":
             df = load_xlsx(filename)
-        elif extfile in ("csv", "tsv"):
+        elif extfile in ("csv", "tsv", "txt"):
             sep = "," if extfile == "csv" else "\t"
             args = dict(filepath_or_buffer=filename, sep=sep)
             if header:

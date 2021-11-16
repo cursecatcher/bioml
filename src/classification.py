@@ -181,37 +181,71 @@ class AldoRitmoClassificazione:
 
 if __name__ == "__main__":
     parser = utils.get_parser("classification")
-    parser.add_argument("--vsize", type=float, default=0.1)
+    parser.add_argument("--vsize", type=float, default=0.1)     #validation set size - if vsize = 0, no validation is extracted
+    parser.add_argument("--only", type=str, default="all")      #extract only specific target class for validation set 
+    parser.add_argument("--aggregate", action="store_true")     #aggregate extracted validation set into the independent validation sets 
+    
     args = parser.parse_args() 
 
-    if not (0 < args.vsize < 1):
-        raise Exception("--vsize parameter value must be in (0, 1)")
+    if not (0 <= args.vsize < 1):
+        raise Exception("--vsize parameter value must be in [0, 1)")
 
     
     #load dataset 
-    # dataset = ds.BinaryClfDataset(args.input_data, args.target, args.labels)
     dataset = ds.BinaryClfDataset(args.input_data, args.target, allowed_values=args.labels, pos_labels=args.pos_labels, neg_labels=args.neg_labels )
     dataset.name = "training set"
     if args.more_data:
         dataset.load_data(args.more_data)
 
+    logging.info(f"Training set loaded: {dataset.shape}")
+
     #load feature lists 
     feature_lists = utils.load_feature_lists( args.feature_lists )
+    logging.info(f"{len(feature_lists)} feature list{'' if len(feature_lists) == 1 else 's'} loaded.")
 
-    #load validation sets 
-    dataset, validation_data = dataset.extract_validation_set(args.vsize)
-    validation_data.name = os.path.basename(args.input_data)  #set validation name as the input dataset used for training 
-    validation_sets = [ validation_data ]
+    ##load validation sets 
+    validation_sets, data_to_aggregate = list(), None
     
+    #extract validation from training ? 
+    if args.vsize > 0:
+        if not args.aggregate:
+            #force to sample both classes - no AUC for datasets having only 1 class 
+            args.only = "all"
+
+        dataset, validation_data = dataset.extract_validation_set(args.vsize, args.only)
+        #set validation name as the input dataset used for training 
+        validation_data.name = os.path.basename(args.input_data)  
+
+        if not args.aggregate:
+            validation_sets.append(validation_data)
+        else:
+            data_to_aggregate = validation_data
+        
+        logging.info(f"Validation set exracted from training: {validation_data.shape}")
+        
+    #independent validation sets 
     if args.validation_sets:
         for vs in args.validation_sets:
             logging.info(f"Loading validation set: {vs}")
             #TODO - load from folders 
             curr_vset = ds.BinaryClfDataset( vs, args.target, allowed_values=args.labels, pos_labels=args.pos_labels, neg_labels=args.neg_labels )
             curr_vset.name = os.path.basename(vs)
-            validation_sets.append( curr_vset )
 
-    
+            logging.info(f"Initial shape: {curr_vset.shape}")
+
+            validation_sets.append( curr_vset )
+        
+        if data_to_aggregate:
+            #merge validation set extracted from training to the external ones 
+            validation_sets = [vs.merge(data_to_aggregate) for vs in validation_sets]
+            
+
+    vsets = [vs.shape for vs in validation_sets]
+    # print("RECAP RUN")
+    # print(f"Training set: {dataset.shape}")
+    # print(f"Validation sets: {vsets}")
+
+
     #process one feature list at the time 
     for fl in feature_lists:
         logging.info(f"List {fl.name} has {len(fl.features)} features")

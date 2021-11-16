@@ -1,5 +1,6 @@
 
 from collections import defaultdict
+from typing import Counter
 import matplotlib.pyplot as plt 
 import numpy as np 
 import os
@@ -381,6 +382,10 @@ class PipelineEvaluator:
         # test each validation set against each trained classifier 
         for validation_set in validation_sets:
             magic_plots[validation_set.name] = plotting.MagicROCPlot(clf_name, validation_set.name)
+    
+            shape_data, shape_target = validation_set.shape
+            if shape_data[0] != shape_target[0]:
+                logging.warning(f"Data & target shapes don't match: {shape_data}, {shape_target}")
 
             for clf in trained_clfs:
                 magic_plots[validation_set.name]\

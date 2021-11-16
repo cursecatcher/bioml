@@ -2,6 +2,7 @@
 
 import argparse
 from collections import defaultdict
+import logging
 import os, subprocess, sys
 import shutil
 import time 
@@ -13,22 +14,22 @@ def get_parser(prog: str) -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog)
     ####################### IO 
     #parent output folder where to save all results
-    # parser.add_argument("-o", "--outfolder", type=str, required=True)       #output folder (to be created)
+    parser.add_argument("-o", "--outfolder", type=str, required=False)       #IGNORED - here just to catch that argument
     parser.add_argument("-i", "--input_data", type=str, required=True)      #input dataset 
     parser.add_argument("-m", "--more_data", type=str, required=False)      #additional data to integrate in the input dataset
     parser.add_argument("-f", "--feature_lists", type=str, nargs="+")       #list of feature lists 
     parser.add_argument("-v", "--validation_sets", type=str, nargs="*")     #list of validation sets
     # ###################### PREDICTION 
     # #target covariate to predict - only categorical features 
-    parser.add_argument("-t", "--target", type=str, required=True)          #name of the (categorical) feature to be predicted 
-    parser.add_argument("-l", "--labels", type=str, nargs=2)                #pair of labels (neg label, pos label)
-    parser.add_argument("-p", "--pos_labels", type=str, nargs="+")          #labels to be considered as positive     
-    parser.add_argument("-n", "--neg_labels", type=str, nargs="+")          #labels to be considered as negative
+    # parser.add_argument("-t", "--target", type=str, required=True)          #name of the (categorical) feature to be predicted 
+    # parser.add_argument("-l", "--labels", type=str, nargs=2)                #pair of labels (neg label, pos label)
+    # parser.add_argument("-p", "--pos_labels", type=str, nargs="+")          #labels to be considered as positive     
+    # parser.add_argument("-n", "--neg_labels", type=str, nargs="+")          #labels to be considered as negative
     # ###################### 
-    parser.add_argument("--trials", type=int, default=1)                    #num of runs to be done 
-    parser.add_argument("--ncv", type=int, default=10)                      #number of folds to be used during cross validation 
+    # parser.add_argument("--trials", type=int, default=1)                    #num of runs to be done 
+    # parser.add_argument("--ncv", type=int, default=10)                      #number of folds to be used during cross validation 
     # specific for classification task 
-    parser.add_argument("--vsize", type=float, default=0.1)
+    # parser.add_argument("--vsize", type=float, default=0.1)
 
     return parser 
 
@@ -44,15 +45,15 @@ def format_args(args, io_args: dict) -> list:
     argstr = list()
 
     ####################### non-IO stuff 
-    argstr.append( f"--target {args.target} --trials {args.trials} --ncv {args.ncv}" )
-    if args.labels:
-        argstr.append( f"--labels {flat_strlist(args.labels)}" )
+    # argstr.append( f"--target {args.target} --trials {args.trials} --ncv {args.ncv}" )
+    # if args.labels:
+    #     argstr.append( f"--labels {flat_strlist(args.labels)}" )
 
-    elif all( [args.pos_labels, args.neg_labels] ):
-        argstr.append( f"--pos_labels {flat_strlist(args.pos_labels)}" )
-        argstr.append( f"--neg_labels {flat_strlist(args.neg_labels)}" )
-    else:
-        sys.exit("Some information about labels is missing")
+    # elif all( [args.pos_labels, args.neg_labels] ):
+    #     argstr.append( f"--pos_labels {flat_strlist(args.pos_labels)}" )
+    #     argstr.append( f"--neg_labels {flat_strlist(args.neg_labels)}" )
+    # else:
+    #     sys.exit("Some information about labels is missing")
     
 
     ####################### IO stuff 
@@ -78,8 +79,7 @@ if __name__ == "__main__":
     parser.add_argument("--fsel", action="store_true")
     parser.add_argument("--rm", action="store_true")
     
-
-    args = parser.parse_args()
+    args, unknownargs = parser.parse_known_args()
     operations = [args.clf, args.fsel]
 
     input_files = dict(
@@ -157,8 +157,12 @@ if __name__ == "__main__":
     docker_run.append( f"cursecatcher/bioml {script}" )
     docker_run.append( " ".join(formatted_args) )
     docker_run.append( "-o /data/results")
-    if args.clf:
-        docker_run.append(f"--vsize {args.vsize}")
+    # if args.clf:
+    #     docker_run.append(f"--vsize {args.vsize}")
+    if unknownargs:
+        logging.info(f"Adding the following additional parameters: {unknownargs}")
+        #TODO - remove -o parameter if it has been passed 
+        docker_run.extend( unknownargs )
 
 
     docker_command = " ".join(docker_run)
@@ -166,10 +170,8 @@ if __name__ == "__main__":
 
     sp = subprocess.run(docker_command, shell=True)
     
-
     while not os.path.exists(cidfile):
         time.sleep(1)
-    
     
     with open(cidfile) as f:
         cid = f.readline().strip()
