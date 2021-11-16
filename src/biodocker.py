@@ -62,11 +62,11 @@ def format_args(args, io_args: dict) -> list:
         argstr.append( f"--more_data {actual_input[1]}")
 
     for cat, files in io_args.items():
-        argstr.append( f"--{cat} {flat_strlist(files)}")
+        if len(files):  #feature lists and independent validation sets
+            argstr.append( f"--{cat} {flat_strlist(files)}")
         
     return argstr
-    ## 
-
+    
 
 
 if __name__ == "__main__":
@@ -100,12 +100,15 @@ if __name__ == "__main__":
         sys.exit(f"ERROR: some input file has not been found:\n{wrong_files}")
 
 
-    if all(operations):
-        sys.exit("ehm")
-    
-    elif not any(operations):
-        sys.exit(
-"""No operation selected. Please choose an operation:
+    too_much, not_enough = all(operations), not any(operations)
+
+    if too_much:
+        print("Just one operation at the time", file=sys.stderr)
+    elif not_enough:
+        print("No operation selected", file=sys.stderr)
+
+    if too_much or not_enough:
+        sys.exit("""Please choose an operation:
 - classification: --clf
 - feature selection: --fsel""")
     
