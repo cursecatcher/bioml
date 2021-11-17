@@ -3,10 +3,18 @@
 import argparse
 from collections import defaultdict
 import logging
+from operator import not_
 import os, subprocess, sys
 import shutil
 import time 
 
+logging.basicConfig(level=logging.DEBUG)
+
+INPUT_DATA = "input_data"
+MORE_DATA = "more_data"
+FEATURE_LISTS = "feature_lists"
+VALIDATION_SETS = "validation_sets"
+VALID_SAMPLES_ID = "vid"
 
 
 
@@ -14,22 +22,13 @@ def get_parser(prog: str) -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog)
     ####################### IO 
     #parent output folder where to save all results
-    parser.add_argument("-o", "--outfolder", type=str, required=False)       #IGNORED - here just to catch that argument
-    parser.add_argument("-i", "--input_data", type=str, required=True)      #input dataset 
-    parser.add_argument("-m", "--more_data", type=str, required=False)      #additional data to integrate in the input dataset
-    parser.add_argument("-f", "--feature_lists", type=str, nargs="+")       #list of feature lists 
-    parser.add_argument("-v", "--validation_sets", type=str, nargs="*")     #list of validation sets
-    # ###################### PREDICTION 
-    # #target covariate to predict - only categorical features 
-    # parser.add_argument("-t", "--target", type=str, required=True)          #name of the (categorical) feature to be predicted 
-    # parser.add_argument("-l", "--labels", type=str, nargs=2)                #pair of labels (neg label, pos label)
-    # parser.add_argument("-p", "--pos_labels", type=str, nargs="+")          #labels to be considered as positive     
-    # parser.add_argument("-n", "--neg_labels", type=str, nargs="+")          #labels to be considered as negative
-    # ###################### 
-    # parser.add_argument("--trials", type=int, default=1)                    #num of runs to be done 
-    # parser.add_argument("--ncv", type=int, default=10)                      #number of folds to be used during cross validation 
-    # specific for classification task 
-    # parser.add_argument("--vsize", type=float, default=0.1)
+    parser.add_argument("-o", "--outfolder", type=str, required=False)         #IGNORED - it's here just to catch that argument
+    parser.add_argument("-i", f"--{INPUT_DATA}", type=str, required=True)      #input dataset 
+    parser.add_argument("-m", f"--{MORE_DATA}", type=str, required=False)      #additional data to integrate in the input dataset
+    parser.add_argument("-f", f"--{FEATURE_LISTS}", type=str, nargs="+")       #list of feature lists 
+    parser.add_argument("-v", f"--{VALIDATION_SETS}", type=str, nargs="*")     #list of validation sets
+
+    parser.add_argument(f"--{VALID_SAMPLES_ID}", type=str, required=False)     #list of samples to be used as validation set 
 
     return parser 
 
@@ -38,34 +37,20 @@ def get_parser(prog: str) -> argparse.ArgumentParser:
 def check_for_existence(files: list):
     return { f: os.path.exists(f) for f in files }
 
-def format_args(args, io_args: dict) -> list:
-    def flat_strlist(l: list):
-        return " ".join( l )
+def format_args(io_args: dict) -> list:
+    argstr = list()    
 
-    argstr = list()
-
-    ####################### non-IO stuff 
-    # argstr.append( f"--target {args.target} --trials {args.trials} --ncv {args.ncv}" )
-    # if args.labels:
-    #     argstr.append( f"--labels {flat_strlist(args.labels)}" )
-
-    # elif all( [args.pos_labels, args.neg_labels] ):
-    #     argstr.append( f"--pos_labels {flat_strlist(args.pos_labels)}" )
-    #     argstr.append( f"--neg_labels {flat_strlist(args.neg_labels)}" )
-    # else:
-    #     sys.exit("Some information about labels is missing")
-    
-
-    ####################### IO stuff 
-    actual_input = io_args.pop("input_data")
-    argstr.append( f"--input_data {actual_input[0]}")
+    actual_input = io_args.pop(INPUT_DATA)
+    argstr.append( f"--{INPUT_DATA} {actual_input[0]}")
     if len(actual_input) == 2:                          #get additional data, if provided 
-        argstr.append( f"--more_data {actual_input[1]}")
+        argstr.append( f"--{MORE_DATA} {actual_input[1]}")
 
-    for cat, files in io_args.items():
-        if len(files):  #feature lists and independent validation sets
-            argstr.append( f"--{cat} {flat_strlist(files)}")
-        
+    #add feature lists and independent validation sets
+    argstr.extend([ 
+        f"--{cat} {' '.join(files)}"
+            for cat, files in io_args.items() 
+                if len(files) ])
+
     return argstr
     
 
@@ -82,13 +67,19 @@ if __name__ == "__main__":
     args, unknownargs = parser.parse_known_args()
     operations = [args.clf, args.fsel]
 
-    input_files = dict(
-        input_data = [ str(args.input_data) ],
-        feature_lists = list(args.feature_lists),
-        validation_sets = list(args.validation_sets)
-    )
+    input_files = dict() 
+    #training set 
+    input_files[INPUT_DATA] = [ str(args.input_data) ]
     if args.more_data:
-        input_files["input_data"].append( str(args.more_data) )
+        input_files[INPUT_DATA].append( str(args.more_data) )
+
+    #feature lists & validation sets 
+    input_files[FEATURE_LISTS] = list(args.feature_lists)
+    input_files[VALIDATION_SETS] = list(args.validation_sets)
+    if args.vid:
+        #optional parameter for classification
+        input_files[VALID_SAMPLES_ID] = [args.vid ]
+
 
     my_files = dict()
 
@@ -102,15 +93,13 @@ if __name__ == "__main__":
 
     too_much, not_enough = all(operations), not any(operations)
 
-    if too_much:
-        print("Just one operation at the time", file=sys.stderr)
-    elif not_enough:
-        print("No operation selected", file=sys.stderr)
-
     if too_much or not_enough:
-        sys.exit("""Please choose an operation:
-- classification: --clf
-- feature selection: --fsel""")
+        if too_much:
+            print("Just one operation at the time", file=sys.stderr)
+        else:
+            print("No operation selected", file=sys.stderr)
+
+        sys.exit("Please select an operation:\n- classification: --clf\n- feature selection: --fsel")
     
 
     #parse args, create docker outfolder
@@ -128,11 +117,23 @@ if __name__ == "__main__":
                 dockpath = os.path.join("/data", cat)                   #get subfolder path in the container 
 
                 for f in cat_files:
-                    basename_f = os.path.basename(f)
+                    if os.path.isfile(f):
+                        basename_f = os.path.basename(f)
+                        #copy file and attach it to the new name to the proper list 
+                        shutil.copyfile(f, os.path.join(outpath, basename_f)) #copy file in the docker folder
+                        new_files_collection[cat].append( 
+                            os.path.join(dockpath, basename_f))             #add input file with new path 
+                    elif os.path.isdir(f):
+                        new_dir_name = os.path.split( f.rstrip("/") )[-1]
+                        new_dir = os.path.join(outpath, new_dir_name)
 
-                    shutil.copyfile(f, os.path.join(outpath, basename_f)) #copy file in the docker folder
-                    new_files_collection[cat].append( 
-                        os.path.join(dockpath, basename_f))             #add input file with new path 
+                        shutil.copytree(f, os.path.join(outpath, new_dir))
+
+                        for root, folders, copied_files in os.walk(new_dir):
+                            new_files_collection[cat].extend([
+                                os.path.join(dockpath, new_dir_name, new_file)
+                                    for new_file in copied_files
+                            ])
 
         except Exception as e:
             shutil.rmtree(docker_outfolder)    
@@ -140,10 +141,9 @@ if __name__ == "__main__":
     else:
         sys.exit("Please provide a new docker outfolder")
         
-
     docker_run = list() 
 
-    formatted_args = format_args(args, new_files_collection)
+    formatted_args = format_args(new_files_collection)
     cidfile = os.path.join(docker_outfolder, 'dockerID')
     script = "feature_selection.py" if args.fsel else "classification.py"
     
@@ -156,17 +156,15 @@ if __name__ == "__main__":
         docker_run.append(f"--name {args.container_name}")
     docker_run.append( f"cursecatcher/bioml {script}" )
     docker_run.append( " ".join(formatted_args) )
-    docker_run.append( "-o /data/results")
-    # if args.clf:
-    #     docker_run.append(f"--vsize {args.vsize}")
+    docker_run.append( "-o /data/results")              #set output folder 
+    
     if unknownargs:
-        logging.info(f"Adding the following additional parameters: {unknownargs}")
-        #TODO - remove -o parameter if it has been passed 
+        logging.info(f"Adding the following additional parameters: {unknownargs}") 
         docker_run.extend( unknownargs )
 
 
     docker_command = " ".join(docker_run)
-    print(f"Running the following container:\n{docker_command}")
+    print(f"#################################################\nRunning the following docker container:\n{docker_command}")
 
     sp = subprocess.run(docker_command, shell=True)
     

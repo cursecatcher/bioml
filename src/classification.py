@@ -3,6 +3,7 @@
 import os, pandas as pd
 from matplotlib import pyplot as plt
 from collections import defaultdict
+import functools, operator
 
 from sklearn.metrics._plot.roc_curve import RocCurveDisplay
 
@@ -97,6 +98,12 @@ class AldoRitmoClassificazione:
         
 
     def evaluate(self, n_replicates: int, n_folds: int, validation_sets: list):
+        pipelines, _ = zip( *
+            functools.reduce( operator.concat, [
+                clf(self.__df.data).get_pipelines() for clf in self.__pipelines ]
+            ))
+        filtered_vs = [vs.extract_subdata( self.__flist ) for vs in validation_sets]
+
         evaluator = mlbox.PipelinesEvaluator(self.__df, n_folds) 
         replicates_results = list()
 
@@ -104,10 +111,10 @@ class AldoRitmoClassificazione:
         for n in range(1, n_replicates + 1):
             logging.info(f"Iteration {n}/{n_replicates}")
 
-            evaluator.reset() 
-            #append a pair of object: (test set, validation sets) performances 
-            replicates_results.append(
-                self.__evaluate_clfs( evaluator, validation_sets ))
+            res_test, res_val = evaluator.evaluate(pipelines, self.__outfolder, filtered_vs)
+            replicates_results.append( (res_test, res_val) )
+            evaluator.reset()
+            
         else:
             logging.info(f"Evaluation terminated successfully... Processing results:")
             self.__results_test_set, self.__results_validation_sets = zip(*replicates_results)
@@ -161,28 +168,14 @@ class AldoRitmoClassificazione:
 
 
 
-    def __evaluate_clfs(self, evaluator: mlbox.PipelinesEvaluator, validation_sets: list):
-        ############## XXX da riscrivere perchè FA SCHIFO 
-        tmp = sum([method(self.__df.data).get_pipelines() for method in self.__pipelines], [])
-        pipelines, _ = zip(*tmp)
-        ############## XXX to do 
-
-        ### reduce validation sets using feature list 
-        vsets = [vset.extract_subdata(self.__flist) for vset in validation_sets]
-        #then train the pipelines and evaluate them on test set and validation sets
-        res_test, res_val = evaluator.evaluate(pipelines, self.__outfolder, vsets)
-
-        return res_test, res_val
-
-
-
-
-
 
 if __name__ == "__main__":
     parser = utils.get_parser("classification")
+    #
+    parser.add_argument("--vid", type=str, required=False)      #extract validation set using samples id file 
     parser.add_argument("--vsize", type=float, default=0.1)     #validation set size - if vsize = 0, no validation is extracted
     parser.add_argument("--only", type=str, default="all")      #extract only specific target class for validation set 
+
     parser.add_argument("--aggregate", action="store_true")     #aggregate extracted validation set into the independent validation sets 
     
     args = parser.parse_args() 
@@ -205,29 +198,36 @@ if __name__ == "__main__":
 
     ##load validation sets 
     validation_sets, data_to_aggregate = list(), None
+
+    if not args.aggregate:
+        #force to sample both classes - no AUC for datasets having only 1 class 
+        args.only = "all"
     
     #extract validation from training ? 
-    if args.vsize > 0:
-        if not args.aggregate:
-            #force to sample both classes - no AUC for datasets having only 1 class 
-            args.only = "all"
+    if any([args.vsize > 0, args.vid]):
+        if args.vid:
+            #extract specific sample 
+            dataset, validation_data = dataset.extract_validation_set(samples_file = args.vid)
+        else:
+            #extract by sampling 
+            dataset, validation_data = dataset.extract_validation_set(size = args.vsize, only = args.only)
 
-        dataset, validation_data = dataset.extract_validation_set(args.vsize, args.only)
         #set validation name as the input dataset used for training 
         validation_data.name = os.path.basename(args.input_data)  
-
+        
         if not args.aggregate:
+            #check presence of both positive and negative examples 
+            assert len( set(validation_data.target) ) == 2
+            #add it to the list of validation sets  
             validation_sets.append(validation_data)
         else:
             data_to_aggregate = validation_data
-        
-        logging.info(f"Validation set exracted from training: {validation_data.shape}")
-        
+
     #independent validation sets 
     if args.validation_sets:
         for vs in args.validation_sets:
             logging.info(f"Loading validation set: {vs}")
-            #TODO - load from folders 
+            #TODO - load from folders ?
             curr_vset = ds.BinaryClfDataset( vs, args.target, allowed_values=args.labels, pos_labels=args.pos_labels, neg_labels=args.neg_labels )
             curr_vset.name = os.path.basename(vs)
 
@@ -238,12 +238,9 @@ if __name__ == "__main__":
         if data_to_aggregate:
             #merge validation set extracted from training to the external ones 
             validation_sets = [vs.merge(data_to_aggregate) for vs in validation_sets]
+            #ensure the presence of examples belonging to both classes
+            assert all([ bool( len(set(vs.target)) == 2 ) for vs in validation_sets ])
             
-
-    vsets = [vs.shape for vs in validation_sets]
-    # print("RECAP RUN")
-    # print(f"Training set: {dataset.shape}")
-    # print(f"Validation sets: {vsets}")
 
 
     #process one feature list at the time 

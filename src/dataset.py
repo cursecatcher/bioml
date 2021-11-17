@@ -166,26 +166,51 @@ class BinaryClfDataset(Dataset):
         return (super().shape, self.target.shape)
 
 
-    def extract_validation_set(self, size: float, only: str) -> tuple:
-        """ Return a pair of dataset (training, validation) """
+    def __extract_validation_by_proportion(self, size: float, only: str) -> tuple:
         logging.info(f"Creating validation set of {self.name} w/ {size} size")
 
-
         if only.lower() == "all": 
-            tmp = [ df.sample(frac=size) for _, df in self.data.groupby(self.target) ]
-            valid = self.__copy(df = pd.concat( tmp ))
+            to_copy = pd.concat([ 
+                df.sample(frac=size) for _, df in self.data.groupby(self.target) ]) 
+
         elif only in self.target_labels:
             target_samples = self.target[ self.target == self.encoding[only] ].index
-            valid = self.__copy(df = self.data.loc[ target_samples ].sample(frac=size))
-            
+            to_copy = self.data.loc[ target_samples ].sample(frac=size)
+
+        try:
+            return self.__copy(df = to_copy)
+        except (NameError, UnboundLocalError):
+            raise InvalidBioMLOperationException( f"--only value can assume one of these values: {self.target_labels}. Current value: {only}. " ) 
+
+
+    def __extract_validation_by_id(self, samples_id) -> tuple:
+
+        if isinstance(samples_id, str):
+            samples_id = list( load_data(samples_id).index ) #interpret as a filepath
+        
+        if isinstance(samples_id, list):
+            return self.__copy( df = self.data.loc[ samples_id ]  )
         else:
-            raise InvalidBioMLOperationException( f"--only {only} doesn't work like that. " ) 
+            raise InvalidBioMLOperationException( f"Incompatible type for samples_id parameter: {type(samples_id)} ")
 
-        training = self.__copy(df = pd.concat(
-            [self.data, valid.data]).drop_duplicates(keep=False))
 
+    def extract_validation_set(self, size: float = None, only: str = None, samples_file = None) -> tuple:
+        """ Return a pair of dataset (training, validation) """
+
+        assert size and only or samples_file
+
+        if samples_file:
+            valid = self.__extract_validation_by_id(samples_file)
+
+        elif size and only:
+            valid = self.__extract_validation_by_proportion(size, only)
+
+        else:
+            raise InvalidBioMLOperationException(f"Need to better describe this error.\nHowever there is a error!")
+
+        training = self.__copy(df = 
+            pd.concat([self.data, valid.data]).drop_duplicates(keep=False))
         logging.debug(f"Training/validation {size} => {training.shape} - {valid.shape}")
-
         return training, valid 
     
 
@@ -209,13 +234,9 @@ class BinaryClfDataset(Dataset):
 
 
     def __copy(self, features: FeatureList = None, df: pd.DataFrame = None):
-        new_df = df 
-        if new_df is None:
-            # print(self.df.columns)
-            new_df = self.df[features.features] if features else self.df 
-        elif features:
+        new_df = self.df if df is None else df
+        if features:
             new_df = new_df[features.features]
-            logging.debug(f"Feature list ignored: {features.features}")
 
         bcd = BinaryClfDataset(new_df)
         bcd.encoding = self.encoding
