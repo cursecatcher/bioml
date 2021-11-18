@@ -192,6 +192,10 @@ if __name__ == "__main__":
 
     logging.info(f"Training set loaded: {dataset.shape}")
 
+    (num_samples, num_features), _ = dataset.shape 
+    logging.info(f"Training set loaded. Number of samples: {num_samples} described by {num_features} features.")
+
+
     #load feature lists 
     feature_lists = utils.load_feature_lists( args.feature_lists )
     logging.info(f"{len(feature_lists)} feature list{'' if len(feature_lists) == 1 else 's'} loaded.")

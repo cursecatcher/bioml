@@ -1,4 +1,4 @@
-
+from collections import Counter
 import pandas as pd
 import os
 import logging
@@ -285,11 +285,25 @@ def load_xlsx(filename, sheet_name = None):
     with pd.ExcelFile(filename) as xlsx:
         if sheet_name is None:
             sheet_name = 0 #get the first sheet 
-        return pd.read_excel(xlsx, sheet_name)
+        df = clean_df( pd.read_excel(xlsx, sheet_name, index_col=0) )
+
+        #try to reindex dataframe if the current index is not univocal 
+        if not df.index.is_unique:
+            logging.warning(f"Number of samples: {df.shape[0]} -- number of samples id: {len(set(df.index))}")
+
+            counter, new_index = Counter(), list() 
+            
+            for curr_id in df.index:
+                new_index.append( (curr_id, counter[curr_id]) )
+                counter[curr_id] += 1
+                
+            df["Sample_ID"] = new_index
+            df = df.reset_index(drop=True).set_index("Sample_ID")
+        
+        return df 
 
 
 def load_data(io, header=True, index=True):
-    # logging.info(f"Loading dataset from {type(io)}")
     df = None 
 
     if isinstance(io, str):
@@ -299,6 +313,7 @@ def load_data(io, header=True, index=True):
 
         if extfile == "xlsx":
             df = load_xlsx(filename)
+
         elif extfile in ("csv", "tsv", "txt"):
             sep = "," if extfile == "csv" else "\t"
             args = dict(filepath_or_buffer=filename, sep=sep)
@@ -313,5 +328,11 @@ def load_data(io, header=True, index=True):
     elif isinstance(io, Dataset):
         df = io.df.copy() 
 
+
     return df
 
+
+def clean_df(df):
+    #rimuove features senza nome 'unnamed:', possibilità di passare lista di feature da buttare?
+    bad_cols = filter(lambda cname: cname.lower().startswith("unnamed"), df)
+    return df.drop(columns=bad_cols)
