@@ -75,10 +75,11 @@ if __name__ == "__main__":
 
     #feature lists & validation sets 
     input_files[FEATURE_LISTS] = list(args.feature_lists)
-    input_files[VALIDATION_SETS] = list(args.validation_sets)
+    if args.validation_sets:
+        input_files[VALIDATION_SETS] = list(args.validation_sets)
     if args.vid:
         #optional parameter for classification
-        input_files[VALID_SAMPLES_ID] = [args.vid ]
+        input_files[VALID_SAMPLES_ID] = [ args.vid ]
 
 
     my_files = dict()
