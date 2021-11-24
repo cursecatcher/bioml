@@ -253,7 +253,7 @@ class KBestEstimator(AbstractPipeline):
     def __init__(self, dataset, k=None):
         if k is None:
             k = dataset.shape[1] // 2
-            while k > 100:
+            while k > 1000:
                 k //= 2
 
         super().__init__(dataset, [

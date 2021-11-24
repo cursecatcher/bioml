@@ -15,7 +15,7 @@ class FeatureList:
 
         col = df.columns[0]
         self.__name = col.strip().replace(" ", "_")
-        self.__features = df[col]
+        self.__features = df[col].drop_duplicates()
 
     @property
     def name(self) -> str:
@@ -24,6 +24,7 @@ class FeatureList:
     @property
     def features(self) -> pd.Series:
         return self.__features 
+
 
     @classmethod
     def load_from_path(cls, path) -> list:
@@ -148,8 +149,9 @@ class BinaryClfDataset(Dataset):
             else:
                 self.encoding = { label: encoding for encoding, label in enumerate(allowed_values) }
             
-            mask = self.df[target_cov].isin(allowed_values)
-            df_masked = self.df[mask]
+            self.df[target_cov] = self.df[target_cov].apply(str) #FIX 23/11: cast to string the target feature 
+            df_masked = self.df[ self.df[target_cov].isin(allowed_values) ]
+
             self.target = df_masked[target_cov].replace( self.encoding )
             self.df = df_masked.drop( columns=[target_cov] )
             self.target_labels = allowed_values
@@ -276,7 +278,7 @@ class InvalidFeatureListException(Exception):
 
 class InvalidBioMLOperationException(Exception):
     def __init__(self, message) -> None:
-        super().__init__(message)
+        super().__init__(message)   
 
 
 
@@ -327,7 +329,6 @@ def load_data(io, header=True, index=True):
         df = io.copy()
     elif isinstance(io, Dataset):
         df = io.df.copy() 
-
 
     return df
 

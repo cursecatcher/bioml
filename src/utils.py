@@ -25,7 +25,7 @@ def load_feature_lists(starting_folders: list):
 def nice_classification_report(y_true, y_pred, target_names: list) -> dict:
 
     bad_report = classification_report(
-        y_true, y_pred, target_names=target_names, output_dict=True)
+        y_true, y_pred, target_names=target_names, output_dict=True, zero_division=0)
     
     nice_report = {
         f"{label}_{statname}": value \

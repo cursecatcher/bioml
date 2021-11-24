@@ -1,12 +1,9 @@
 #!/usr/bin/env python3 
 
-import argparse
+import argparse, getpass, time 
 from collections import defaultdict
 import logging
-from operator import not_
-import os, subprocess, sys
-import shutil
-import time 
+import os, subprocess, sys, shutil
 
 logging.basicConfig(level=logging.DEBUG)
 
@@ -29,6 +26,8 @@ def get_parser(prog: str) -> argparse.ArgumentParser:
     parser.add_argument("-v", f"--{VALIDATION_SETS}", type=str, nargs="*")     #list of validation sets
 
     parser.add_argument(f"--{VALID_SAMPLES_ID}", type=str, required=False)     #list of samples to be used as validation set 
+
+    parser.add_argument("--as_root", action="store_true")
 
     return parser 
 
@@ -148,10 +147,13 @@ if __name__ == "__main__":
     cidfile = os.path.join(docker_outfolder, 'dockerID')
     script = "feature_selection.py" if args.fsel else "classification.py"
     
+    id_subcommand = f"$(id -u {getpass.getuser()})"
+    as_user = f"-u {id_subcommand}:{id_subcommand}"
+    if args.as_root:
+        as_user = ""
 
-    docker_run.append("docker run -d --user 1000:1000")
+    docker_run.append(f"docker run -d {as_user} --cidfile {cidfile}")
     docker_run.append(f"-v {docker_outfolder}:/data")
-    docker_run.append(f"--cidfile {cidfile}")
 
     if args.container_name:
         docker_run.append(f"--name {args.container_name}")

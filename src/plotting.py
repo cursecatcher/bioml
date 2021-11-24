@@ -2,16 +2,12 @@
 from collections import Counter
 import logging
 import matplotlib.pyplot as plt
-from numpy.lib.function_base import average 
 import pandas as pd 
 import numpy as np
 import sklearn.metrics as metrics
 from sklearn.metrics._plot.roc_curve import RocCurveDisplay 
 
 import utils
-
-
-
 
 
 
@@ -115,11 +111,13 @@ class MagicROCPlot:
     def reduce_cv_reports(cls, reports: list):
         
         new_rows = list()
+        columns = [c for c in reports[0].keys() if c not in ("validation_set", "clf", "n_fold")]
+        tmp_columns = ["mean_value", "std_value"]
 
         for (vset, clf), subdf in pd.DataFrame(reports).groupby(by=["validation_set", "clf"]):
-            means, stds = subdf.mean(), subdf.std()
+            means, stds = subdf[columns].mean(), subdf[columns].std()
             tmpdf = pd.concat([means, stds], axis=1)
-            tmpdf.columns = ["mean_value", "std_value"]
+            tmpdf.columns = tmp_columns
 
             d = dict(validation_set = vset, clf = clf)
             for sname, row in tmpdf.iterrows():
