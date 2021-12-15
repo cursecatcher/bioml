@@ -103,12 +103,11 @@ if __name__ == "__main__":
     
 
     #parse args, create docker outfolder
-    docker_outfolder = args.docker_outfolder 
+    docker_outfolder = os.path.abspath( args.docker_outfolder )
     new_files_collection = defaultdict(list)
 
     if not os.path.exists(docker_outfolder):
         os.mkdir(docker_outfolder)                                      #build folder for docker container 
-        docker_outfolder = os.path.abspath(docker_outfolder)            #get abspath for mounting 
         print(f"Outfolder created in {docker_outfolder}")
         try:
             for cat, cat_files in input_files.items():
@@ -146,28 +145,30 @@ if __name__ == "__main__":
     formatted_args = format_args(new_files_collection)
     cidfile = os.path.join(docker_outfolder, 'dockerID')
     script = "feature_selection.py" if args.fsel else "classification.py"
-    
-    id_subcommand = f"$(id -u {getpass.getuser()})"
-    as_user = f"-u {id_subcommand}:{id_subcommand}"
-    if args.as_root:
-        as_user = ""
 
-    docker_run.append(f"docker run -d {as_user} --cidfile {cidfile}")
-    docker_run.append(f"-v {docker_outfolder}:/data")
+    docker_run.append(f"docker run -d --cidfile {cidfile} -v {docker_outfolder}:/data")
+    
+    if not args.as_root:
+        get_id = f"$(id -u {getpass.getuser()})"
+        as_user = f"-u {get_id}:{get_id}"
+        docker_run.append( as_user )
 
     if args.container_name:
         docker_run.append(f"--name {args.container_name}")
-    docker_run.append( f"cursecatcher/bioml {script}" )
+        
+    docker_run.append( f"cursecatcher/bioml {script} -o /data/{os.path.basename(args.docker_outfolder)}_results" ) #set output folder 
     docker_run.append( " ".join(formatted_args) )
-    docker_run.append( "-o /data/results")              #set output folder 
     
     if unknownargs:
         logging.info(f"Adding the following additional parameters: {unknownargs}") 
         docker_run.extend( unknownargs )
 
 
-    docker_command = " ".join(docker_run)
-    print(f"#################################################\nRunning the following docker container:\n{docker_command}")
+    docker_command = " ".join(docker_run)    
+    with open(os.path.join(docker_outfolder, "COMMAND"), "w") as f:
+        f.write(docker_command)
+
+    print(f"Running the docker container:\n{docker_command}\n")
 
     sp = subprocess.run(docker_command, shell=True)
     
@@ -181,6 +182,6 @@ if __name__ == "__main__":
     try:
         subprocess.run(f"docker logs -f {cid}", shell=True)
     except KeyboardInterrupt:
-        print(f"Ok, bye.\nPs. your container ID is {cid}")
+        print(f"\nOk, bye.\nPs. your container ID is {cid}")
 
 
