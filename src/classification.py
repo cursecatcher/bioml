@@ -20,7 +20,8 @@ class AldoRitmoClassificazione:
     def __init__(self, dataset: ds.BinaryClfDataset, flist: ds.FeatureList = None, outfolder: str = "./") -> None:
         self.__df = dataset.extract_subdata( flist )
         self.__flist = flist 
-        self.__outfolder = utils.make_folder( outfolder, flist.name )
+        fname = flist.name if flist is not None else "None"
+        self.__outfolder = utils.make_folder( outfolder, fname )
 
         self.__pipelines = [ ssz.EstimatorWithoutFS ]
         self.__results_test_set = None 
@@ -120,6 +121,7 @@ class AldoRitmoClassificazione:
             self.__results_test_set, self.__results_validation_sets = zip(*replicates_results)
             test_samples, test_metrics = self.process_test_results()
             samples_validation, metrics_validations, roc_data = self.process_validation_results()
+                
         
 
         logging.info(f"Processing terminated... Writing results:")

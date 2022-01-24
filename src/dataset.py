@@ -75,6 +75,23 @@ class Dataset:
         self.__name = n
     
 
+    def save(self, outpath: str):
+        if outpath.endswith(".xlsx"):
+            raise NotImplementedError()
+        else:
+            separator = "," if outpath.endswith(".csv") else "\t"
+            self.data.to_csv(outpath, sep=separator, index=True)
+
+
+
+    def __add__(self, other):
+        merged = self.merge([other])
+        df = merged.data.reset_index() \
+            .drop_duplicates(subset="index", keep="last")\
+            .set_index("index").sort_index()
+        return Dataset(df)
+
+
     def merge(self, datasets: list):
         assert type(datasets) in (list, tuple)
         df = pd.concat( [self.data] + [d.data for d in datasets])
@@ -260,6 +277,11 @@ class BinaryClfDataset(Dataset):
         self.target = pd.concat([self.target] + [dataset.target])
 
         return self 
+    
+    def save(self, outpath, target_name = "target"):
+        self.data[target_name] = self.target
+        super().save(outpath)
+        self.data.drop(columns=[target_name], inplace=True)
 
 
 

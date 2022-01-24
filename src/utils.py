@@ -53,7 +53,7 @@ def get_parser(prog: str) -> argparse.ArgumentParser:
     parser.add_argument("-p", "--pos_labels", type=str, nargs="+")          #labels to be considered as positive     
     parser.add_argument("-n", "--neg_labels", type=str, nargs="+")          #labels to be considered as negative
     ###################### 
-    parser.add_argument("--trials", type=int, default=1)                    #num of runs to be done 
+    parser.add_argument("--trials", type=int, default=2)                    #num of runs to be done 
     parser.add_argument("--ncv", type=int, default=10)                      #number of folds to be used during cross validation 
 
     return parser 
