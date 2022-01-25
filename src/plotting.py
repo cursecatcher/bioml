@@ -108,13 +108,15 @@ class MagicROCPlot:
 
 
     @classmethod
-    def reduce_cv_reports(cls, reports: list):
+    def reduce_cv_reports(cls, reports: list)-> tuple: #pair of (pd.DataFrame, pd.DataFrame)
         
         new_rows = list()
         columns = [c for c in reports[0].keys() if c not in ("validation_set", "clf", "n_fold")]
         tmp_columns = ["mean_value", "std_value"]
 
-        for (vset, clf), subdf in pd.DataFrame(reports).groupby(by=["validation_set", "clf"]):
+        full_df = pd.DataFrame(reports)
+
+        for (vset, clf), subdf in full_df.groupby(by=["validation_set", "clf"]):
             means, stds = subdf[columns].mean(), subdf[columns].std()
             tmpdf = pd.concat([means, stds], axis=1)
             tmpdf.columns = tmp_columns
@@ -126,7 +128,7 @@ class MagicROCPlot:
                 })
             new_rows.append(d)
         
-        return pd.DataFrame(new_rows)
+        return full_df, pd.DataFrame(new_rows)
     
     @classmethod
     def reduce_replicate_run_reports(cls, reports: list):

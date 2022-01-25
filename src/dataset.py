@@ -1,4 +1,5 @@
 from collections import Counter
+from tokenize import maybe
 import pandas as pd
 import os
 import logging
@@ -328,6 +329,10 @@ def load_xlsx(filename, sheet_name = None):
 
 
 def load_data(io, header=True, index=True):
+    def maybe_set(flag, name: str):
+        if flag:
+            args[name] = 0 
+
     df = None 
 
     if isinstance(io, str):
@@ -340,11 +345,11 @@ def load_data(io, header=True, index=True):
 
         elif extfile in ("csv", "tsv", "txt"):
             sep = "," if extfile == "csv" else "\t"
-            args = dict(filepath_or_buffer=filename, sep=sep)
-            if header:
-                args["header"] = 0
-            if index:
-                args["index_col"] = 0
+            args = dict(filepath_or_buffer = filename, sep = sep, low_memory = False)
+
+            maybe_set(header, "header")
+            maybe_set(index, "index_col")
+            
             df = pd.read_csv(**args)
 
     elif isinstance(io, pd.DataFrame):
@@ -359,3 +364,4 @@ def clean_df(df):
     #rimuove features senza nome 'unnamed:', possibilità di passare lista di feature da buttare?
     bad_cols = filter(lambda cname: cname.lower().startswith("unnamed"), df)
     return df.drop(columns=bad_cols)
+

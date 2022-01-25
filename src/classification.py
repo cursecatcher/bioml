@@ -1,6 +1,7 @@
 #!/usr/bin/env python3 
 
 import os, pandas as pd
+import matplotlib.backends.backend_pdf
 from matplotlib import pyplot as plt
 from collections import defaultdict
 import functools, operator
@@ -35,12 +36,16 @@ class AldoRitmoClassificazione:
         for rt in self.__results_test_set:
             #get all reports from all folds of each run 
             reports = [ r for p in rt.plots for r in p.reports ]
+            
             metrics_reports.append(
                 MagicROCPlot.reduce_cv_reports(reports))
+        
+        full_dfs, metrics_reports = zip(*metrics_reports)
+        all_the_stats = pd.concat(full_dfs)
 
         test_metrics = MagicROCPlot.reduce_replicate_run_reports(metrics_reports)
 
-        return test_samples, test_metrics
+        return test_samples, test_metrics, all_the_stats
     
     def process_validation_results(self):
         samples_dict, metrics_dict = defaultdict(list), defaultdict(list)
@@ -62,8 +67,6 @@ class AldoRitmoClassificazione:
                 if validation_index.get(vname) is None:
                     validation_index[vname] = sample_report.true_y
         
-
-
         samples_validation = dict()
         for v, samples_list in samples_dict.items():
             #refining sample reports - add true_y columns
@@ -73,6 +76,8 @@ class AldoRitmoClassificazione:
         ############ computing metrics 
         roc_dict = defaultdict(dict) #key: (vname) -> value: averaged roc for each classifier 
         metrics_validation = list()
+        all_the_stats = list() 
+        
 
         for (clf, vname), replicate_report in metrics_dict.items():
             #get averaged roc from predicted y
@@ -83,17 +88,21 @@ class AldoRitmoClassificazione:
                 roc_dict[vname]["true_y"] = true_y
                 
             #get average performance from reports from each replicate
-            report_lists = [
+            full_report_lists = [
                     MagicROCPlot.reduce_cv_reports(res_on_folds[0].reports) \
                         for res_on_folds in replicate_report   ]
-               
-                #get final average performance 
+
+            full_dfs, report_lists = zip(*full_report_lists)
+            all_the_stats.extend( full_dfs )                #store CV stats 
+
+            #get final average performance 
             metrics_validation.append(
                 MagicROCPlot.reduce_replicate_run_reports(report_lists))
-        else:
-            metrics_validation = pd.concat(metrics_validation)
+        # else:
+        all_the_stats = pd.concat(all_the_stats)            #build dataframe 
+        metrics_validation = pd.concat(metrics_validation)  #
         
-        return samples_validation, metrics_validation, roc_dict
+        return samples_validation, metrics_validation, roc_dict, all_the_stats
 
 
         
@@ -119,27 +128,28 @@ class AldoRitmoClassificazione:
         else:
             logging.info(f"Evaluation terminated successfully... Processing results:")
             self.__results_test_set, self.__results_validation_sets = zip(*replicates_results)
-            test_samples, test_metrics = self.process_test_results()
-            samples_validation, metrics_validations, roc_data = self.process_validation_results()
-                
-        
+            test_samples, test_metrics, full_stats_test = self.process_test_results()
+            samples_validation, metrics_validations, roc_data, full_stats_val = self.process_validation_results()
+            
 
         logging.info(f"Processing terminated... Writing results:")
 
+        with matplotlib.backends.backend_pdf.PdfPages( os.path.join(self.__outfolder, "RocCurves.pdf") ) as pdf:
+            for vname, clf_rocs in roc_data.items():
+                true_y = clf_rocs.pop("true_y") 
 
-        for vname, clf_rocs in roc_data.items():
-            true_y = clf_rocs.pop("true_y") 
-
-            fig, ax = plt.subplots()
-
-            ##### plot con tutti i clf e le AUC medie del validation set 
-            for clf, data in clf_rocs.items():
-                RocCurveDisplay.from_predictions(
-                    true_y,
-                    data["final_mean"], ax=ax, alpha=1, name=clf)
-            plt.title(f"ROC plot for validation set: {vname}")
-            plt.savefig(os.path.join(self.__outfolder, f"ROC_plot_{vname}.pdf"))
-            plt.close(fig)
+                ##### plot con tutti i clf e le AUC medie del validation set 
+                fig, ax = plt.subplots()
+                
+                for clf, data in clf_rocs.items():
+                    RocCurveDisplay.from_predictions(
+                        true_y,
+                        data["final_mean"], ax=ax, alpha=1, name=clf)
+                # plt.title(f"ROC plot for validation set: {vname}")
+                # plt.savefig(os.path.join(self.__outfolder, f"ROC_plot_{vname}.pdf"))
+                fig.suptitle(f"ROC plot for validation set: {vname}")
+                pdf.savefig( fig )
+                plt.close( fig )
 
 
         ##mettere scritture fuori da qua 
@@ -149,6 +159,16 @@ class AldoRitmoClassificazione:
 
             for vset, df in metrics_validations.groupby(by="validation_set"):
                 df.to_excel(xlsx, sheet_name=vset, index=False)
+
+
+        with pd.ExcelWriter(os.path.join(self.__outfolder, "ALL_STATS.xlsx")) as xlsx:
+            full_stats_test.sort_values(["clf"]).to_excel(xlsx, sheet_name="TEST SET", index=False)
+
+            for vset, subdf in full_stats_val.groupby(by=["validation_set"]):
+                subdf.to_excel(xlsx, sheet_name=vset, index=False)
+
+
+
 
         with pd.ExcelWriter(os.path.join(self.__outfolder, "samples_report.xlsx")) as xlsx:
             def reformat_df(df, sheetname):

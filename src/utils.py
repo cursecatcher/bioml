@@ -9,7 +9,7 @@ logginglevel = logging.INFO
 
 
 def make_folder(starting_folder: str, new_foldername: str):
-    complete_path = os.path.join(starting_folder, new_foldername)
+    complete_path =  os.path.abspath( os.path.join(starting_folder, new_foldername) )
     if not os.path.exists(complete_path):
         os.makedirs(complete_path)
     return complete_path
