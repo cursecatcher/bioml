@@ -62,6 +62,9 @@ if __name__ == "__main__":
     parser.add_argument("--clf", action="store_true")
     parser.add_argument("--fsel", action="store_true")
     parser.add_argument("--rm", action="store_true")
+
+    parser.add_argument("--verbose", action="store_true")
+    parser.add_argument("--tag", type=str, default="latest")
     
     args, unknownargs = parser.parse_known_args()
     operations = [args.clf, args.fsel]
@@ -155,8 +158,9 @@ if __name__ == "__main__":
 
     if args.container_name:
         docker_run.append(f"--name {args.container_name}")
-        
-    docker_run.append( f"cursecatcher/bioml {script} -o /data/{os.path.basename(args.docker_outfolder)}_results" ) #set output folder 
+    
+    image_tag = f":{args.tag}"
+    docker_run.append( f"cursecatcher/bioml{image_tag} {script} -o /data/{os.path.basename(args.docker_outfolder)}_results" ) #set output folder 
     docker_run.append( " ".join(formatted_args) )
     
     if unknownargs:
@@ -178,10 +182,11 @@ if __name__ == "__main__":
     with open(cidfile) as f:
         cid = f.readline().strip()
 
-    print("Showing current execution. Press ctrl+c to quit.")
-    try:
-        subprocess.run(f"docker logs -f {cid}", shell=True)
-    except KeyboardInterrupt:
-        print(f"\nOk, bye.\nPs. your container ID is {cid}")
+    if args.verbose:
+        print("Showing current execution. Press ctrl+c to quit.")
+        try:
+            subprocess.run(f"docker logs -f {cid}", shell=True)
+        except KeyboardInterrupt:
+            print(f"\nOk, bye.\nPs. your container ID is {cid}")
 
 
