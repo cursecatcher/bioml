@@ -201,7 +201,8 @@ class PipelineEvaluator:
             cv_results.update( res_val )
             
         #build sample report for training/test set 
-        test_report = plotting.SamplesReport(index, self.__true_y)
+        test_report = plotting.SamplesReport(index, self.__true_y, "test")
+        # raise Exception(test_report)
 
         for clf, plot in cv_results_test.items():
             test_report.put_plot(clf, plot)
@@ -218,7 +219,7 @@ class PipelineEvaluator:
             #iterate over results (over) the same validation set
             for vname, plot in plot_validations.items():
                 vset = validation_dict.get(vname)
-                curr = samples_reports[(clf, vname)] = plotting.SamplesReport(vset.data.index, vset.target)
+                curr = samples_reports[(clf, vname)] = plotting.SamplesReport(vset.data.index, vset.target, vname)
                 curr.save_plot(plot) #save metrics 
                 #iterate over classifier results in the N folds
                 for i, y_pred_vector in enumerate(plot.predictions):

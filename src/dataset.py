@@ -1,5 +1,4 @@
 from collections import Counter
-from tokenize import maybe
 import pandas as pd
 import os
 import logging
@@ -17,6 +16,7 @@ class FeatureList:
         col = df.columns[0]
         self.__name = col.strip().replace(" ", "_")
         self.__features = df[col].drop_duplicates()
+
 
     @property
     def name(self) -> str:
@@ -151,7 +151,8 @@ class Dataset:
 
 class BinaryClfDataset(Dataset):
 
-    def __init__(self, io, target_cov: str = None, allowed_values: tuple = None, pos_labels: tuple = tuple(), neg_labels: tuple = tuple()):
+    # def __init__(self, io, target_cov: str = None, allowed_values: tuple = None, pos_labels: tuple = tuple(), neg_labels: tuple = tuple()):
+    def __init__(self, io, target_cov: str = None, pos_labels: tuple = tuple(), neg_labels: tuple = tuple()):
         super().__init__(io=io)
 
         self.target = None 
@@ -159,13 +160,14 @@ class BinaryClfDataset(Dataset):
         self.target_labels = None 
 
         if target_cov:
-            if allowed_values is None:
-                assert pos_labels and neg_labels # 
-                allowed_values = tuple(list(pos_labels) + list(neg_labels))
-                #encode more than 2 labels mapping to [0, 1]
-                self.encoding = { label: int(label in pos_labels) for label in allowed_values }
-            else:
-                self.encoding = { label: encoding for encoding, label in enumerate(allowed_values) }
+            assert pos_labels and neg_labels 
+            pos_labels, neg_labels = set(pos_labels), set(neg_labels)
+            assert not pos_labels.intersection( neg_labels )
+            allowed_values = pos_labels.union(neg_labels)   
+            #encoding labels: 1 if label belongs to pos_labels, 0 otherwise
+            self.encoding = { 
+                label: int( label in pos_labels ) \
+                    for label in allowed_values }
             
             self.df[target_cov] = self.df[target_cov].apply(str) #FIX 23/11: cast to string the target feature 
             df_masked = self.df[ self.df[target_cov].isin(allowed_values) ]
@@ -173,10 +175,18 @@ class BinaryClfDataset(Dataset):
             self.target = df_masked[target_cov].replace( self.encoding )
             self.df = df_masked.drop( columns=[target_cov] )
             self.target_labels = allowed_values
+            
             if len( self.encoding ) > 2:
+                #cast labels sets to lists and sort them 
+                pos_labels, neg_labels = [ 
+                    sorted( list( _set ) ) \
+                        for _set in (pos_labels, neg_labels) ]
+
                 self.target_labels = ["_".join(neg_labels), "_".join(pos_labels) ]
                 #rebuild encoding mapping from new target labels to [0, 1]
                 self.encoding = { label: i for i, label in enumerate(self.target_labels) }
+            else:
+                self.target_labels = allowed_values
 
             self.encode_features()
             self.fix_missing() 

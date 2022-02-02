@@ -1,9 +1,13 @@
 import argparse, os
-from ast import parse
 import dataset as ds 
 import pandas as pd 
-import logging
 from sklearn.metrics import classification_report
+import numpy as np, scipy.stats as st 
+from statsmodels.graphics.gofplots import qqplot
+import matplotlib.pyplot as plt 
+import seaborn as sns
+import logging
+
 logginglevel = logging.INFO
 
 
@@ -57,3 +61,70 @@ def get_parser(prog: str) -> argparse.ArgumentParser:
     parser.add_argument("--ncv", type=int, default=10)                      #number of folds to be used during cross validation 
 
     return parser 
+
+
+#### some gaussian distribution checks
+
+def shapiro_test(data): #test for gaussian data 
+    stat, p = st.shapiro(data)
+    alpha = 0.05 
+    return p > alpha, (stat, p)
+
+def normaltest(data):
+    stat, p = st.normaltest(data)
+    alpha = 0.05
+    return p > alpha, (stat, p)
+
+def anderson(data):
+    result = st.anderson(data)
+    
+    test_results = [   
+        (result.statistic < cv, (sl, cv))
+            for sl, cv in zip(result.significance_level, result.critical_values) ]
+
+    #list of bool (True is gaussian), list of statistics (pair significance level, critical value)
+    flags, stats = [list(x) for x in zip(*test_results)]
+    stats.insert(0, result.statistic)
+
+    return flags, stats 
+
+def confidence_interval(interval, data):
+    mean, std = np.mean(data), np.std(data)
+    _, high = st.norm.interval(interval, loc=mean, scale=std/np.sqrt( len(data) ))
+    return mean, std, (high - mean)
+
+def gaussian_check_plot(df: pd.DataFrame, col: str):
+    data = df.reset_index()
+
+    fig, (ax1, ax2) = plt.subplots(1, 2)
+    fig.set_size_inches(18,7)
+
+    sns.histplot(data=data, x=col, ax=ax1, kde=True)
+    qqplot(data[col], line='s', ax=ax2)
+
+    ax1.set_title("Histogram")
+    ax2.set_title("Quantile-Quantile Plot")
+
+    return fig, (ax1, ax2)
+    
+
+def gaussian_checks(interval: float, df: pd.DataFrame, col: str):
+    data = df[col]
+    shapiro = shapiro_test(data)
+    normal = normaltest(data)
+    andersontest = anderson(data)
+    mean, std, ci = confidence_interval(interval, data)
+    # fig, axes = None, None 
+
+    # try:
+    #     fig, axes = gaussian_check_plot(df, col)
+    # except ValueError:
+    #     print("NO PLOT")
+    data = [ col, mean, std, ci, shapiro[0], normal[0],  True ]
+    columns = [
+        "metric", "mean", "std", "CI 95%", "shapiro", "normal", "anderson"]
+
+
+    return pd.DataFrame(data=[ data ], columns=columns)
+
+

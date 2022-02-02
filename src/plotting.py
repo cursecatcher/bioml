@@ -1,4 +1,5 @@
 
+import inspect
 from collections import Counter
 import logging
 import matplotlib.pyplot as plt
@@ -8,6 +9,8 @@ import sklearn.metrics as metrics
 from sklearn.metrics._plot.roc_curve import RocCurveDisplay 
 
 import utils
+
+
 
 
 
@@ -110,11 +113,11 @@ class MagicROCPlot:
     @classmethod
     def reduce_cv_reports(cls, reports: list)-> tuple: #pair of (pd.DataFrame, pd.DataFrame)
         
-        new_rows = list()
         columns = [c for c in reports[0].keys() if c not in ("validation_set", "clf", "n_fold")]
         tmp_columns = ["mean_value", "std_value"]
 
         full_df = pd.DataFrame(reports)
+        new_rows = list()
 
         for (vset, clf), subdf in full_df.groupby(by=["validation_set", "clf"]):
             means, stds = subdf[columns].mean(), subdf[columns].std()
@@ -157,12 +160,22 @@ def plot_averaged_roc(plot_list: list, true_y):
     plt.close(fig)
 
 def compute_averaged_roc(plot_list, true_y):
+
+    #put predictions from all the folds (in any run) in a single list 
+    runs = [] 
+
+    for reports in plot_list:
+        for cv in reports:
+            runs.extend( cv.prob_predicted )
+    
     averages_per_run = [
         report_replicate[0].average().prob_predicted for report_replicate in plot_list
     ]
+    
     return dict(
         means = averages_per_run, 
-        final_mean = np.mean(averages_per_run, axis=0))
+        final_mean = np.mean(averages_per_run, axis=0), 
+        prob_predicted = runs)
 
 
 def plot(tprs, aucs):
@@ -196,7 +209,8 @@ def plot(tprs, aucs):
 
 
 class SamplesReport:
-    def __init__(self, index, true_y) -> None:
+    def __init__(self, index, true_y, name: str) -> None:
+        self.__name = name 
         self.__samples = index
         self.__true_y = true_y
         self.__df = None 
@@ -204,12 +218,18 @@ class SamplesReport:
         self.__plots = list()
 
     @property
+    def name(self) -> str:
+        return self.__name 
+
+    @property
     def plots(self) -> list:
         return self.__plots
     
     @property
     def df(self) -> pd.DataFrame:
-        return self.__df
+        if isinstance(self.__df, pd.DataFrame):
+            return self.__df
+        raise Exception("No dataframe lol")
     
     @property
     def true_y(self):
@@ -294,14 +314,15 @@ class SamplesReport:
         #merge all dataframes in a single one with multiple columns w/ same name 
         large_df = pd.concat(df_samples_reports, axis=1)
         #this object (not modified) is just used to call the majority voting method 
-        obj = cls(None, None)
+        obj = cls( ** { 
+            arg: None for arg in inspect.getfullargspec(cls).args \
+                if arg != "self" } )
         classifiers_names = set(large_df.columns)
         # print(classifiers_names)
         #get majority voting for each classifier 
         averages = {
             clf: obj.majority_voting(
-                large_df[clf]) for clf in classifiers_names
-        }
+                large_df[clf]) for clf in classifiers_names }
         df = pd.DataFrame(
             index = large_df.index, data=averages)
         if true_y is not None:

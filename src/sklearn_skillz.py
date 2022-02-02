@@ -1,4 +1,4 @@
-import numpy as np 
+import numpy as np
 import enum
 import abc 
 import pandas as pd 
@@ -9,7 +9,7 @@ from sklearn.linear_model import \
     SGDClassifier, \
     LassoCV
 from sklearn.naive_bayes import GaussianNB
-from sklearn.svm import LinearSVC
+from sklearn.svm import LinearSVC, SVC
 from sklearn.ensemble import \
     RandomForestClassifier, \
     GradientBoostingClassifier
@@ -86,8 +86,32 @@ class ClassifiersToEvaluate(enum.Enum):
     LOGISTIC_REGRESSION = ("log_reg", LogisticRegression)
     RANDOM_FOREST = ("r_forest", RandomForestClassifier)
     GRADIENT_BOOSTING = ("g_boost", GradientBoostingClassifier)
+    SVMACHINE = ("svm", SVC)
     # GAUSSIAN_NAIVE_BAYES = ("gaussian_nb", GaussianNB)
+
+    @classmethod
+    def get_params(cls, clfcls):
+        args = dict() 
+
+        if clfcls is LogisticRegression:
+            args = dict( penalty = "l2" )
+
+        elif clfcls is RandomForestClassifier:
+            args = dict( n_estimators = 111, criterion = "entropy" ) 
+
+        elif clfcls is GradientBoostingClassifier:
+            args = dict( n_estimators = 111 )
+        
+        elif clfcls is SVC:
+            args = dict( probability = True )
+        
+        elif clfcls is GaussianNB:
+            pass 
+        
+        else:
+            raise Exception(f"What is that:\n{clfcls}")
     
+        return clfcls( **args )
 
 class FeatureSelectionHyperParameters:
     @classmethod
@@ -157,22 +181,23 @@ class ClassifiersHyperParameters:
             RandomForestClassifier: cls.randomForestParameters, 
             GradientBoostingClassifier: cls.gradientBoostingParameters, 
             SGDClassifier: cls.sdgClassifierParameters,
-            # GaussianNB: cls.gaussianNBClassifierParameters
+            SVC: cls.svmParameters,
+            GaussianNB: cls.gaussianNBClassifierParameters
         }
         # get estimator's hyperparameters
         estimator_t = type(pipeline[-1])
-        clf_hp = clf_params[estimator_t]()
+        clf_hp = clf_params[estimator_t]()        
         # get the hyperparameters of the rest of the pipeline 
         fs_hp = FeatureSelectionHyperParameters.get_params(pipeline, max_features)
 
         return {**fs_hp, **clf_hp}
 
 
-    # @classmethod
-    # def gaussianNBClassifierParameters(cls):
-    #     return dict(
-    #         gnb = [GaussianNB()]
-    #     )
+    @classmethod
+    def gaussianNBClassifierParameters(cls):
+        return dict(
+            # gnb = [GaussianNB()]
+        )
 
 
     @classmethod
@@ -195,7 +220,7 @@ class ClassifiersHyperParameters:
             lin_SVM__loss = ["hinge", "squared_hinge"], 
             lin_SVM__C = [0.1, 1, 10, 100, 1000], 
             lin_SVM__dual = [False], 
-            lin_SVM__max_iter = [10000]
+            lin_SVM__max_iter = [10000], 
         )
     
     @classmethod
@@ -232,12 +257,38 @@ class ClassifiersHyperParameters:
 class AbstractPipeline(abc.ABC):
     def __init__(self, dataset, pipeline_steps):
         self.__n_features = dataset.shape[1]
-        self.__pipelines = [Pipeline([
-            #unpack previous pipeline steps
-            *pipeline_steps, 
-            #add estimator 
-            (clf_entry.value[0], clf_entry.value[1]())]) \
-                for clf_entry in ClassifiersToEvaluate]
+
+
+        self.__pipelines = list() 
+        for clf_entry in ClassifiersToEvaluate:
+            name, clf = clf_entry.value
+            self.__pipelines.append( Pipeline([
+                #unpack previous step
+                *pipeline_steps, 
+                #put estimator 
+                ( name, ClassifiersToEvaluate.get_params(clf) ) 
+            ]))
+
+        # self.__pipelines = [
+        #     Pipeline([
+        #         #unpack previous pipeline steps
+        #         *pipeline_steps, 
+        #         #add estimator: name, sklearn,estimator 
+        #         (
+        #             clf_entry.value[0], 
+        #             ClassifiersToEvaluate.get_params( clf_entry.value[1] ) 
+        #         )])
+        #             for clf_entry in ClassifiersToEvaluate
+        # ]
+
+        # print(self.__pipelines)
+
+
+        # self.__pipelines = [Pipeline([
+        #     #add estimator 
+        #     (clf_entry.value[0], clf_entry.value[1]())]) \
+        #         for clf_entry in ClassifiersToEvaluate]
+
 
     def get_pipelines(self):
         """ Returns a list of pairs (pipeline, pipeline_params) 
@@ -247,6 +298,7 @@ class AbstractPipeline(abc.ABC):
             (pipeline, ClassifiersHyperParameters.get_params(pipeline, self.__n_features)) \
                 for pipeline in self.__pipelines
         ]
+    
 
 
 class KBestEstimator(AbstractPipeline):

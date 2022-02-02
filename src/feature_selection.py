@@ -51,7 +51,7 @@ class FeaturesSearcher:
             final_df = pd.concat(final_df)\
                 .set_index("clf")\
                 .drop(columns=["validation_set"])
-            # print(final_df)
+                
         
 
         measures = ["AUC"]
@@ -75,9 +75,15 @@ class FeaturesSearcher:
             evaluator = mlbox.PipelinesEvaluator(self.__df, n_folds=n_folds )
             samples_report, _ = evaluator.evaluate(pipelines, os.path.join(outfolder, f"k_{k}"))
 
-            df_eval = pd.concat([
-                MagicROCPlot.reduce_cv_reports(clf_report.reports) \
-                for clf_report in samples_report.plots   ])
+
+            df_eval = list() 
+
+            for clf_report in samples_report.plots:
+                #TODO: save full dataframe containing CV performances
+                full, stuff = MagicROCPlot.reduce_cv_reports( clf_report.reports )
+                df_eval.append( stuff )
+
+            df_eval = pd.concat( df_eval )
 
             df_eval["n_features"] = k 
             dfs.append(df_eval)
@@ -188,11 +194,14 @@ if __name__ == "__main__":
     parser = utils.get_parser("feature selection")
     args = parser.parse_args()
 
-    dataset = ds.BinaryClfDataset(args.input_data, args.target, args.labels, pos_labels=args.pos_labels, neg_labels=args.neg_labels)
+    dataset = ds.BinaryClfDataset(args.input_data, args.target,args.pos_labels, args.neg_labels)
     if args.more_data:
         dataset.load_data(args.more_data)
 
     feature_lists = utils.load_feature_lists( args.feature_lists )
+
+    if len(feature_lists) == 0:
+        raise Exception("Cannot load feature files")
 
     for fl in feature_lists:
         logging.info(f"List {fl.name} has {len(fl.features)} features")
