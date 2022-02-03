@@ -125,15 +125,18 @@ class AldoRitmoClassificazione:
         evaluator = mlbox.PipelinesEvaluator(self.__df, n_folds) 
         replicates_results = list()
 
+        
+
         for n in range(1, n_replicates + 1):
-            logging.info(f"Iteration {n}/{n_replicates}")
+            # logging.info(f"Iteration {n}/{n_replicates}")
 
             res_test, res_val = evaluator.evaluate(pipelines, self.__outfolder, filtered_vs)
             replicates_results.append( (res_test, res_val) )
             evaluator.reset()
             
         self.__results_test_set, self.__results_validation_sets = zip(*replicates_results)
-        # print(self.__results_test_set)
+        print(self.__results_test_set)
+        
         test_samples, test_metrics, full_stats_test = self.process_test_results()
         samples_validation, metrics_validations, roc_data, full_stats_val = self.process_validation_results()
             

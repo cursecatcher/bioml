@@ -161,7 +161,12 @@ class BinaryClfDataset(Dataset):
 
         if target_cov:
             assert pos_labels and neg_labels 
-            pos_labels, neg_labels = set(pos_labels), set(neg_labels)
+
+            try:
+                pos_labels, neg_labels = set(pos_labels), set(neg_labels)
+            except TypeError:
+                pos_labels, neg_labels = { pos_labels }, { neg_labels }
+
             assert not pos_labels.intersection( neg_labels )
             allowed_values = pos_labels.union(neg_labels)   
             #encoding labels: 1 if label belongs to pos_labels, 0 otherwise
@@ -175,7 +180,7 @@ class BinaryClfDataset(Dataset):
             self.target = df_masked[target_cov].replace( self.encoding )
             self.df = df_masked.drop( columns=[target_cov] )
             self.target_labels = allowed_values
-            
+
             if len( self.encoding ) > 2:
                 #cast labels sets to lists and sort them 
                 pos_labels, neg_labels = [ 

@@ -53,7 +53,7 @@ def get_parser(prog: str) -> argparse.ArgumentParser:
     ###################### PREDICTION 
     #target covariate to predict - only categorical features 
     parser.add_argument("-t", "--target", type=str, required=True)          #name of the (categorical) feature to be predicted 
-    parser.add_argument("-l", "--labels", type=str, nargs=2)                #pair of labels (neg label, pos label)
+    # parser.add_argument("-l", "--labels", type=str, nargs=2)                #pair of labels (neg label, pos label)
     parser.add_argument("-p", "--pos_labels", type=str, nargs="+")          #labels to be considered as positive     
     parser.add_argument("-n", "--neg_labels", type=str, nargs="+")          #labels to be considered as negative
     ###################### 

@@ -257,9 +257,8 @@ class ClassifiersHyperParameters:
 class AbstractPipeline(abc.ABC):
     def __init__(self, dataset, pipeline_steps):
         self.__n_features = dataset.shape[1]
-
-
         self.__pipelines = list() 
+        
         for clf_entry in ClassifiersToEvaluate:
             name, clf = clf_entry.value
             self.__pipelines.append( Pipeline([
@@ -268,26 +267,6 @@ class AbstractPipeline(abc.ABC):
                 #put estimator 
                 ( name, ClassifiersToEvaluate.get_params(clf) ) 
             ]))
-
-        # self.__pipelines = [
-        #     Pipeline([
-        #         #unpack previous pipeline steps
-        #         *pipeline_steps, 
-        #         #add estimator: name, sklearn,estimator 
-        #         (
-        #             clf_entry.value[0], 
-        #             ClassifiersToEvaluate.get_params( clf_entry.value[1] ) 
-        #         )])
-        #             for clf_entry in ClassifiersToEvaluate
-        # ]
-
-        # print(self.__pipelines)
-
-
-        # self.__pipelines = [Pipeline([
-        #     #add estimator 
-        #     (clf_entry.value[0], clf_entry.value[1]())]) \
-        #         for clf_entry in ClassifiersToEvaluate]
 
 
     def get_pipelines(self):
