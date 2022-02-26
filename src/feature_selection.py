@@ -61,10 +61,10 @@ class FeaturesSearcher:
 
     def __generate(self, outfolder: str, n_folds: int):
         df, y = self.__df.df, self.__df.target
-        dfs, ntot_f = list(), df.shape[1]
+        dfs, ntot_f = list(), df.shape[1] 
         
 
-        for k in range(1, ntot_f + 1):
+        for k in range(1, ntot_f + 1): 
             logging.info(f"Progress: {k}/{ntot_f}")
 
             #get pipelines 
@@ -72,8 +72,12 @@ class FeaturesSearcher:
             pipelines = reduce(operator.concat, [ 
                 [*map(lambda x: x[0], e(df, k).get_pipelines())] for e in estimators ])
 
-            evaluator = mlbox.PipelinesEvaluator(self.__df, n_folds=n_folds )
-            samples_report, _ = evaluator.evaluate(pipelines, os.path.join(outfolder, f"k_{k}"))
+            try:
+                evaluator = mlbox.PipelinesEvaluator(self.__df, n_folds=n_folds )
+                samples_report, _ = evaluator.evaluate(pipelines, os.path.join(outfolder, f"k_{k}"))
+            except ValueError as e:
+                logging.warning(f"Exploded for unknown reason: {e}")
+                break 
 
 
             df_eval = list() 
@@ -84,7 +88,6 @@ class FeaturesSearcher:
                 df_eval.append( stuff )
 
             df_eval = pd.concat( df_eval )
-
             df_eval["n_features"] = k 
             dfs.append(df_eval)
 
@@ -196,7 +199,8 @@ if __name__ == "__main__":
 
     dataset = ds.BinaryClfDataset(args.input_data, args.target,args.pos_labels, args.neg_labels)
     if args.more_data:
-        dataset.load_data(args.more_data)
+        for more in args.more_data:
+            dataset.load_data( more )
 
     feature_lists = utils.load_feature_lists( args.feature_lists )
 

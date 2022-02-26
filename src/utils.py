@@ -47,7 +47,7 @@ def get_parser(prog: str) -> argparse.ArgumentParser:
     #parent output folder where to save all results
     parser.add_argument("-o", "--outfolder", type=str, required=True)       #output folder (to be created)
     parser.add_argument("-i", "--input_data", type=str, required=True)      #input dataset 
-    parser.add_argument("-m", "--more_data", type=str, required=False)      #additional data to integrate in the input dataset
+    parser.add_argument("-m", "--more_data", type=str, nargs="*", required=False)      #additional data to integrate in the input dataset
     parser.add_argument("-f", "--feature_lists", type=str, nargs="+")       #list of feature lists 
     parser.add_argument("-v", "--validation_sets", type=str, nargs="*")     #list of validation sets
     ###################### PREDICTION 
@@ -86,7 +86,7 @@ def anderson(data):
     flags, stats = [list(x) for x in zip(*test_results)]
     stats.insert(0, result.statistic)
 
-    return flags, stats 
+    return (flags, stats)
 
 def confidence_interval(interval, data):
     mean, std = np.mean(data), np.std(data)
@@ -96,35 +96,61 @@ def confidence_interval(interval, data):
 def gaussian_check_plot(df: pd.DataFrame, col: str):
     data = df.reset_index()
 
-    fig, (ax1, ax2) = plt.subplots(1, 2)
+    fig, axes = plt.subplots(2, 2)
     fig.set_size_inches(18,7)
 
-    sns.histplot(data=data, x=col, ax=ax1, kde=True)
-    qqplot(data[col], line='s', ax=ax2)
+    # try:
+    sns.histplot(data=data, x=col, ax=axes.flat[0], kde=True)
+    # except np.core._exceptions.MemoryError as e:
+        # logging.ERROR(f"...")
+    qqplot(data[col], line='s', ax=axes.flat[1])
 
-    ax1.set_title("Histogram")
-    ax2.set_title("Quantile-Quantile Plot")
+    sns.boxplot( x = data[col], ax=axes.flat[2] )
 
-    return fig, (ax1, ax2)
-    
+    axes.flat[0].set_title("Histogram")
+    axes.flat[1].set_title("Quantile-Quantile Plot")
+    axes.flat[2].set_title("Boxplot")
+
+    return fig, axes
 
 def gaussian_checks(interval: float, df: pd.DataFrame, col: str):
     data = df[col]
-    shapiro = shapiro_test(data)
-    normal = normaltest(data)
-    andersontest = anderson(data)
+    _, (s1, p1) = shapiro_test(data)
+    _, (s2, p2) = normaltest(data)
+    # _, (sl, pl) = anderson(data)
     mean, std, ci = confidence_interval(interval, data)
-    # fig, axes = None, None 
 
-    # try:
-    #     fig, axes = gaussian_check_plot(df, col)
-    # except ValueError:
-    #     print("NO PLOT")
-    data = [ col, mean, std, ci, shapiro[0], normal[0],  True ]
+
+    data = [ 
+        col, mean, std, ci, 
+        s1, p1, 
+        s2, p2]
+
     columns = [
-        "metric", "mean", "std", "CI 95%", "shapiro", "normal", "anderson"]
+        "metric", "mean", "std", "CI 95%", 
+        "s-shapiro", "p-shapiro",
+        "s-normal", "p-normal"]
+        # "s-anderson", "p-anderson"]
 
 
     return pd.DataFrame(data=[ data ], columns=columns)
 
+
+
+def phi_correlation(df: pd.DataFrame, col1: str, col2: str) -> float:
+    crosstab = pd.crosstab(
+        index = df[col1], columns=df[col2])
+    
+    try:
+#https://www.statisticshowto.com/phi-coefficient-mean-square-contingency-coefficient/
+#http://web.pdx.edu/~newsomj/pa551/lectur15.htm
+        assert crosstab.shape == (2,2)
+        crosstab = crosstab.to_numpy()
+        num = crosstab[0,0]*crosstab[1,1] - crosstab[0,1]*crosstab[1,0]
+        den = crosstab[0,:].sum() * crosstab[1,:].sum() * crosstab[:,0].sum() * crosstab[:,1].sum()
+        phi = num / np.sqrt( den )
+    except AssertionError:
+        phi = .0 
+    
+    return phi 
 

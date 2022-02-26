@@ -6,10 +6,10 @@ import numpy as np
 import os
 import pandas as pd
 
-from sklearn.model_selection import StratifiedKFold, cross_val_score
+from sklearn.model_selection import StratifiedKFold
 import sklearn.metrics as metrics 
 from sklearn.base import clone as sklearn_clone
-from sklearn.utils import validation
+from sklearn.utils import class_weight, compute_sample_weight
 
 import dataset as ds, sklearn_skillz as ssz
 import plotting
@@ -184,9 +184,17 @@ class PipelineEvaluator:
         #build y values and index of dataset following the ordering given by folds
         index = list()
         for _, idx_test in folds:
-            self.__true_y.extend( list(dataset.target[idx_test]) )
-            index.extend( list(dataset.data.iloc[idx_test].index) )
+            # print(idx_test)
+            # print(dataset.target.iloc[idx_test].tolist())
+            # print(dataset.target[idx_test])
 
+            ### TO CHECK 
+            self.__true_y.extend(  dataset.target.iloc[idx_test].tolist()  )   
+            index.extend( dataset.data.iloc[idx_test].index  )
+            #### WITHOUT ILOC 
+            # self.__true_y.extend( list(dataset.target[idx_test]) )
+            # index.extend( list(dataset.data.iloc[idx_test].index) )
+        
         #define dictionaries for save valuable data 
         #key: clf name, value: magic plots (test set + validation sets)
         cv_results = dict() 
@@ -231,14 +239,33 @@ class PipelineEvaluator:
 
 
     def test_clf_in_cv(self, clf, dataset: ds.BinaryClfDataset, folds: list, validation_sets: list):
+        
+        def fit_classifier(clf: ssz.Pipeline, class_weight: dict, X, y, clfname: str):
+            try:
+                #passing parameters to estimator.fit meethod at the end of sklearn.pipeline:
+                #https://stackoverflow.com/questions/36205850/sklearn-pipeline-applying-sample-weights-after-applying-a-polynomial-feature-t
+                fit_params = { f"{clfname}__sample_weight" : compute_sample_weight(class_weight, y) }
+                return sklearn_clone(clf).fit(X, y, **fit_params )
+            except TypeError as te:
+                return sklearn_clone(clf).fit(X, y)
+
         clf_name = PipelineEvaluator.get_pipeline_name(clf).replace("scaler_", "")
         magic_plots = dict()
-        # logging.info(f"Evaluating {clf_name}")
+
+        #compute class weight for imbalanced datasets
+        y_training_sample = dataset.target.iloc[ folds[0][0] ] #taking a sample fold w/ training purpose
+        cw = class_weight.compute_class_weight( 
+            "balanced", 
+            classes=np.unique(y_training_sample), 
+            y = y_training_sample)
+        cw = dict( enumerate(cw) )
 
         #fit a classifier for each fold 
-        trained_clfs = [sklearn_clone(clf).fit(
-            dataset.data.iloc[idx_train], dataset.target.iloc[idx_train]) \
-                for idx_train, _ in folds] 
+        estimator_name = list(clf.named_steps)[-1]
+        data, target = dataset.data, dataset.target 
+        trained_clfs = [ 
+            fit_classifier(clf, cw, data.iloc[idx_train], target.iloc[idx_train], estimator_name) \
+                for idx_train, _ in folds ] 
 
         #get feature importances from each trained classifier 
         for n_fold, clf in enumerate(trained_clfs, 1):

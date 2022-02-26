@@ -1,15 +1,12 @@
 #!/usr/bin/env python3 
 
-from ctypes import util
+
 import os, pandas as pd, numpy as np
-from sklearn.exceptions import NotFittedError 
 from sklearn.metrics import classification_report, roc_curve
 import matplotlib.backends.backend_pdf
 from matplotlib import pyplot as plt
 from collections import defaultdict
 import functools, operator
-
-from sklearn.metrics._plot.roc_curve import RocCurveDisplay
 
 import dataset as ds 
 import mlbox, sklearn_skillz as ssz
@@ -25,13 +22,57 @@ class AldoRitmoClassificazione:
     def __init__(self, dataset: ds.BinaryClfDataset, flist: ds.FeatureList = None, outfolder: str = "./") -> None:
         self.__df = dataset.extract_subdata( flist )
         self.__flist = flist 
-        fname = flist.name if flist is not None else "None"
+        fname = flist.name if flist is not None else "Unnamed"
         self.__outfolder = utils.make_folder( outfolder, fname )
 
         self.__pipelines = [ ssz.EstimatorWithoutFS ]
 
         self.__results_test_set = None 
         self.__results_validation_sets = None 
+
+
+    @property
+    def final_results(self):
+        if hasattr(self, "__final_results"):
+            return None 
+        return self.__final_results
+
+
+    def evaluate(self, n_replicates: int, n_folds: int, validation_sets: list):
+        pipelines, _ = zip( *
+            functools.reduce( operator.concat, [
+                clf(self.__df.data).get_pipelines() for clf in self.__pipelines ]
+            ))
+
+        # print(pipelines[0])
+        filtered_vs = [vs.extract_subdata( self.__flist ) for vs in validation_sets]
+
+        evaluator = mlbox.PipelinesEvaluator(self.__df, n_folds) 
+        replicates_results = list()
+
+        
+
+        for n in range(1, n_replicates + 1):
+            # logging.info(f"Iteration {n}/{n_replicates}")
+
+            res_test, res_val = evaluator.evaluate(pipelines, self.__outfolder, filtered_vs)
+            replicates_results.append( (res_test, res_val) )
+            evaluator.reset()
+            
+        self.__results_test_set, self.__results_validation_sets = zip(*replicates_results)
+        # print(self.__results_test_set)
+        
+        test_samples, test_metrics, full_stats_test = self.process_test_results()
+        samples_validation, metrics_validations, roc_data, full_stats_val = self.process_validation_results()
+            
+        self.__final_results = dict(
+            classification_report = (test_metrics, metrics_validations), 
+            all_stats = (full_stats_test, full_stats_val), 
+            samples = (test_samples, samples_validation),
+            roc_curves = roc_data
+        )
+
+        return self 
 
     
     def process_test_results(self):
@@ -110,48 +151,13 @@ class AldoRitmoClassificazione:
         
         return samples_validation, metrics_validation, roc_dict, all_the_stats
 
-
-        
-
-    def evaluate(self, n_replicates: int, n_folds: int, validation_sets: list):
-        pipelines, _ = zip( *
-            functools.reduce( operator.concat, [
-                clf(self.__df.data).get_pipelines() for clf in self.__pipelines ]
-            ))
-
-        # print(pipelines[0])
-        filtered_vs = [vs.extract_subdata( self.__flist ) for vs in validation_sets]
-
-        evaluator = mlbox.PipelinesEvaluator(self.__df, n_folds) 
-        replicates_results = list()
-
-        
-
-        for n in range(1, n_replicates + 1):
-            # logging.info(f"Iteration {n}/{n_replicates}")
-
-            res_test, res_val = evaluator.evaluate(pipelines, self.__outfolder, filtered_vs)
-            replicates_results.append( (res_test, res_val) )
-            evaluator.reset()
-            
-        self.__results_test_set, self.__results_validation_sets = zip(*replicates_results)
-        print(self.__results_test_set)
-        
-        test_samples, test_metrics, full_stats_test = self.process_test_results()
-        samples_validation, metrics_validations, roc_data, full_stats_val = self.process_validation_results()
-            
-        self.__final_results = dict(
-            classification_report = (test_metrics, metrics_validations), 
-            all_stats = (full_stats_test, full_stats_val), 
-            samples = (test_samples, samples_validation),
-            roc_curves = roc_data
-        )
-
-        return self 
     
     def write_classification_report(self, report_name: str = "classification_report"):
         with pd.ExcelWriter(os.path.join(self.__outfolder, f"{report_name}.xlsx")) as xlsx:
             test_metrics, metrics_validations = self.__final_results.get( "classification_report" )
+
+            # print(test_metrics)
+            # print(metrics_validations)
 
             test_metrics.to_excel(xlsx, sheet_name="TEST SET")
             metrics_validations.to_excel(xlsx, sheet_name="VALIDATION SET", index=False)
@@ -337,9 +343,12 @@ if __name__ == "__main__":
     
     #load dataset 
     dataset = ds.BinaryClfDataset(args.input_data, args.target, pos_labels=args.pos_labels, neg_labels=args.neg_labels )
+
+
     dataset.name = "training set"
     if args.more_data:
-        dataset.load_data(args.more_data)
+        for more in args.more_data:
+            dataset.load_data( more )
 
     logging.info(f"Training set loaded: {dataset.shape}")
 
@@ -359,6 +368,7 @@ if __name__ == "__main__":
     
     #extract validation from training ? 
     if any([args.vsize > 0, args.vid]):
+
         if args.vid:
             #extract specific sample 
             dataset, validation_data = dataset.extract_validation_set(samples_file = args.vid)

@@ -109,7 +109,7 @@ class ClassifiersToEvaluate(enum.Enum):
             pass 
         
         else:
-            raise Exception(f"What is that:\n{clfcls}")
+            raise Exception(f"Unsupported estimator: {clfcls}")
     
         return clfcls( **args )
 

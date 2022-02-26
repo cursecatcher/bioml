@@ -1,5 +1,10 @@
 from collections import Counter
+import matplotlib.pyplot as plt 
+import seaborn as sns 
+from sklearn.decomposition import PCA, KernelPCA
+from sklearn.preprocessing import StandardScaler
 import pandas as pd
+from pandas.plotting import scatter_matrix
 import os
 import logging
 logging.basicConfig(level=logging.INFO)
@@ -8,15 +13,21 @@ logging.basicConfig(level=logging.INFO)
 class FeatureList:
     def __init__(self, io):
         df = load_data(io, header=False, index=False)
-        assert isinstance(df, pd.DataFrame)
-        if len(df.columns) > 1:
-            raise InvalidFeatureListException(io)
-        logging.info(f"Loaded feature list from {io} -- {df.shape[0]} features")
 
-        col = df.columns[0]
-        self.__name = col.strip().replace(" ", "_")
-        self.__features = df[col].drop_duplicates()
+        try:
+            assert isinstance(df, pd.DataFrame)
+            if len(df.columns) > 1:
+                raise InvalidFeatureListException(io)
+            logging.info(f"Loaded feature list from {io} -- {df.shape[0]} features")
 
+            col = df.columns[0]
+            self.__name = col.strip().replace(" ", "_")
+            self.__features = df[col].drop_duplicates()
+        except AssertionError:
+            #assuming io is an iterable
+            self.__features = list( io )
+            self.__name = f"feature_list__{len(self.__features)}"
+            
 
     @property
     def name(self) -> str:
@@ -25,6 +36,10 @@ class FeatureList:
     @property
     def features(self) -> pd.Series:
         return self.__features 
+    
+
+    def __repr__(self) -> str:
+        return self.__features.__repr__()
 
 
     @classmethod
@@ -119,6 +134,8 @@ class Dataset:
         assert df_merged is not None
         self.df = df_merged
         logging.info(f"Data merged successfully - new shape: {self.df.shape}")
+        self.fix_missing()
+        self.encode_features()
         return self 
  
     def encode_features(self):
@@ -139,10 +156,10 @@ class Dataset:
             self.df.fillna(self.df.mean(), inplace=True)
 
 
-    def __clean_df(self):
-        #rimuove features senza nome 'unnamed:', possibilità di passare lista di feature da buttare?
-        bad_cols = filter(lambda cname: cname.lower().startswith("unnamed"), self.df)
-        self.df.drop(columns=bad_cols, inplace=True)
+    # def __clean_df(self):
+    #     #rimuove features senza nome 'unnamed:', possibilità di passare lista di feature da buttare?
+    #     bad_cols = filter(lambda cname: cname.lower().startswith("unnamed"), self.df)
+    #     self.df.drop(columns=bad_cols, inplace=True)
         
 
 
@@ -195,6 +212,12 @@ class BinaryClfDataset(Dataset):
 
             self.encode_features()
             self.fix_missing() 
+
+        elif isinstance(io, BinaryClfDataset):
+            self.target = io.target.copy()
+            self.encoding = io.encoding.copy()
+            self.target_labels = io.target_labels
+            # self.target_labels = self.target_labels.copy()
     
     @property
     def shape(self):
@@ -243,9 +266,16 @@ class BinaryClfDataset(Dataset):
         else:
             raise InvalidBioMLOperationException(f"Need to better describe this error.\nHowever there is a error!")
 
-        training = self.__copy(df = 
-            pd.concat([self.data, valid.data]).drop_duplicates(keep=False))
-        logging.debug(f"Training/validation {size} => {training.shape} - {valid.shape}")
+
+        # training = self.__copy(df = 
+        #     pd.concat([self.data, valid.data]).drop_duplicates(keep=False))
+        # logging.debug(f"Training/validation {size} => {training.shape} - {valid.shape}")
+
+        # FIX 4/02/2022: remove validation samples from training set exploiting indexes -- 
+        training = self.__copy(
+            df = self.data.drop( valid.data.index )
+        )
+
         return training, valid 
     
 
@@ -266,6 +296,10 @@ class BinaryClfDataset(Dataset):
 
         assert isinstance(subdata, BinaryClfDataset)
         return subdata
+    
+
+    def copy(self):
+        return self.__copy()
 
 
     def __copy(self, features: FeatureList = None, df: pd.DataFrame = None):
@@ -276,7 +310,7 @@ class BinaryClfDataset(Dataset):
         bcd = BinaryClfDataset(new_df)
         bcd.encoding = self.encoding
         bcd.name = self.name 
-        bcd.target = self.target[bcd.data.index]    #extracts target values of samples present in the dataset 
+        bcd.target = self.target[bcd.data.index].copy()  #extracts target values of samples present in the dataset 
         bcd.target_labels = self.target_labels
         
         return bcd 
@@ -298,7 +332,6 @@ class BinaryClfDataset(Dataset):
         self.data[target_name] = self.target
         super().save(outpath)
         self.data.drop(columns=[target_name], inplace=True)
-
 
 
 
