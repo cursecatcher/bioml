@@ -30,14 +30,14 @@ class FeaturesSearcher:
         self.__evaluation_k_features = list()
 
     
-    def evaluate(self, num_trials: int, n_folds: int):
+    def evaluate(self, num_trials: int, n_folds: int, max_num_features: int = None):
         tmp_folder = os.path.join(self.__output_folder, "replicates", "rep_{}") ##XXX zippare ?
         #train N times the clfs on the dataset saving results in different folders 
         logging.info(f"Starting {num_trials} training-test iterations.")
         # for each trial, generate a list of K dataframes (K is the total number of features). 
         # The k-th dataframe provides classifiers metrics using k features
         a_lot_of_dataframes = [ 
-            self.__generate(tmp_folder.format(n), n_folds)  
+            self.__generate(tmp_folder.format(n), n_folds, max_num_features)  
             for n in range(1, num_trials + 1) ]
         # build a list of dataframes grouping by the number of features
         # so that the n-th element groups the results over the N trials 
@@ -59,10 +59,12 @@ class FeaturesSearcher:
         self.make_report(final_df, measures)
     
 
-    def __generate(self, outfolder: str, n_folds: int):
+    def __generate(self, outfolder: str, n_folds: int, max_num_features: int):
         df, y = self.__df.df, self.__df.target
         dfs, ntot_f = list(), df.shape[1] 
         
+        if max_num_features and max_num_features < ntot_f:
+            ntot_f = max_num_features
 
         for k in range(1, ntot_f + 1): 
             logging.info(f"Progress: {k}/{ntot_f}")
@@ -125,7 +127,7 @@ class FeaturesSearcher:
                 sorted_dfs.append( subdf.sort_values(by=[measure, "n_features"], ascending=[False, True]))
 
                 selector = ssz.SelectKBest if "kbest" in clf_name else ssz.SelectFromModel
-                # print(selector)
+                
                 if feature_selected.get(selector) is None:
                     #key: k, value: list of k features 
                     feature_selected[selector] = dict() 
@@ -136,7 +138,7 @@ class FeaturesSearcher:
                         for result_run in evaluation:
                             chosen_features.extend( [
                                 it.best_features[clf_name]["mean"].sort_values(ascending=False).index \
-                                for it in result_run    
+                                    for it in result_run    
                             ])
                                 
                         feature_importances = pd.DataFrame(data=[x.to_series().tolist() for x in chosen_features])
@@ -195,6 +197,7 @@ class FeaturesSearcher:
 
 if __name__ == "__main__":
     parser = utils.get_parser("feature selection")
+    parser.add_argument("--max_nf", type=int, required=False)
     args = parser.parse_args()
 
     dataset = ds.BinaryClfDataset(args.input_data, args.target,args.pos_labels, args.neg_labels)
@@ -210,5 +213,7 @@ if __name__ == "__main__":
     for fl in feature_lists:
         logging.info(f"List {fl.name} has {len(fl.features)} features")
         data = dataset.extract_subdata(fl)
+        ### XXX : descriptive data using fl 
         current_outfolder = utils.make_folder(args.outfolder, f"fselect__{fl.name}")
-        FeaturesSearcher(data, current_outfolder, fl.name).evaluate(args.trials, args.ncv)
+        searcher = FeaturesSearcher(data, current_outfolder, fl.name)
+        searcher.evaluate(args.trials, args.ncv, args.max_nf)
