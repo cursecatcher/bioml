@@ -1,10 +1,13 @@
 import argparse, os
+
+from sklearn import metrics
 import dataset as ds 
 import pandas as pd 
 from sklearn.metrics import classification_report
 import numpy as np, scipy.stats as st 
 from statsmodels.graphics.gofplots import qqplot
 import matplotlib.pyplot as plt 
+import matplotlib.backends.backend_pdf as backend_pdf
 import seaborn as sns
 import logging
 
@@ -37,6 +40,7 @@ def nice_classification_report(y_true, y_pred, target_names: list) -> dict:
                 for statname, value in bad_report.get(label).items()
     }
     nice_report["accuracy"] = bad_report.get("accuracy")
+    nice_report["cohen-kappa"] = metrics.cohen_kappa_score( y_true, y_pred )
 
     return nice_report
 
@@ -99,11 +103,15 @@ def gaussian_check_plot(df: pd.DataFrame, col: str):
     fig, axes = plt.subplots(2, 2)
     fig.set_size_inches(18,7)
 
-    # try:
-    sns.histplot(data=data, x=col, ax=axes.flat[0], kde=True)
-    # except np.core._exceptions.MemoryError as e:
-        # logging.ERROR(f"...")
-    qqplot(data[col], line='s', ax=axes.flat[1])
+    try:
+        sns.histplot(data=data, x=col, ax=axes.flat[0], kde=True)
+    except Exception as e:
+        logging.error(f"CANNOT PLOT HISTOGRAM for {col}:\n{e}")
+
+    try:
+        qqplot(data[col], line='s', ax=axes.flat[1])
+    except Exception as e:
+        logging.error(f"CANNOT PLOT QQPLOT for {col}:\n{e}")
 
     sns.boxplot( x = data[col], ax=axes.flat[2] )
 

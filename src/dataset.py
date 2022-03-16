@@ -1,4 +1,5 @@
 from collections import Counter
+import numpy as np 
 import matplotlib.pyplot as plt 
 import seaborn as sns 
 from sklearn.decomposition import PCA, KernelPCA
@@ -22,7 +23,7 @@ class FeatureList:
 
             col = df.columns[0]
             self.__name = col.strip().replace(" ", "_")
-            self.__features = df[col].drop_duplicates()
+            self.__features = df[col].drop_duplicates().tolist()
         except AssertionError:
             #assuming io is an iterable
             self.__features = list( io )
@@ -32,11 +33,15 @@ class FeatureList:
     @property
     def name(self) -> str:
         return self.__name 
-    
+        
     @property
-    def features(self) -> pd.Series:
+    def features(self) -> list: #pd.Series:
         return self.__features 
     
+    @name.setter
+    def name(self, newname):
+        self.__name = newname
+
 
     def __repr__(self) -> str:
         return self.__features.__repr__()
@@ -93,7 +98,8 @@ class Dataset:
 
     def save(self, outpath: str):
         if outpath.endswith(".xlsx"):
-            raise NotImplementedError()
+            with pd.ExcelWriter( outpath ) as xlsx:
+                self.data.to_excel( xlsx, index=True)
         else:
             separator = "," if outpath.endswith(".csv") else "\t"
             self.data.to_csv(outpath, sep=separator, index=True)
@@ -119,24 +125,29 @@ class Dataset:
         df = load_data(io)
         assert isinstance(df, pd.DataFrame)
         
-        df_attempts = (df, df.T)
-        df_merged = None 
+        curr_samples = set( self.data.index.tolist() )
+        target_df = df if curr_samples.intersection( df.index.tolist() ) else df.T
 
-        present_cols = set(self.df.columns)
+        incoming_samples = set( target_df.index.tolist() )
+        common = curr_samples.intersection( incoming_samples )
+        unique_curr = curr_samples.difference( incoming_samples )
+        unique_incoming = incoming_samples.difference( curr_samples )
 
-        for att in df_attempts:
-            res = pd.merge(self.df, att, left_index=True, right_index=True)
-
-            if not res.empty:
-                if set(res.columns).difference(att.columns) == present_cols:
-                    df_merged = res 
-
-        assert df_merged is not None
-        self.df = df_merged
-        logging.info(f"Data merged successfully - new shape: {self.df.shape}")
+        self.df = pd.merge( self.data, target_df, left_index=True, right_index=True )
         self.fix_missing()
-        self.encode_features()
+        self.encode_features() 
+
+        logging.info(
+f"""    in common: {len(common)}  -- unique curr: {len(unique_curr)} -- unique incoming: {len(unique_incoming)} """)
+
+        if unique_curr:
+            logging.warning(f"Unmatched samples: {', '.join(sorted(unique_curr))}")
+        
+        logging.info(f"\nData merged successfully - new shape: {self.df.shape}")
+
+
         return self 
+
  
     def encode_features(self):
         df = self.df
@@ -172,6 +183,7 @@ class BinaryClfDataset(Dataset):
     def __init__(self, io, target_cov: str = None, pos_labels: tuple = tuple(), neg_labels: tuple = tuple()):
         super().__init__(io=io)
 
+        self.__target_name = target_cov
         self.target = None 
         self.encoding = None 
         self.target_labels = None 
@@ -208,7 +220,8 @@ class BinaryClfDataset(Dataset):
                 #rebuild encoding mapping from new target labels to [0, 1]
                 self.encoding = { label: i for i, label in enumerate(self.target_labels) }
             else:
-                self.target_labels = allowed_values
+                self.target_labels = [  neg_labels.pop(), pos_labels.pop()  ]
+
 
             self.encode_features()
             self.fix_missing() 
@@ -217,11 +230,26 @@ class BinaryClfDataset(Dataset):
             self.target = io.target.copy()
             self.encoding = io.encoding.copy()
             self.target_labels = io.target_labels
+            self.__target_name = io.__target_name
             # self.target_labels = self.target_labels.copy()
     
     @property
     def shape(self):
         return (super().shape, self.target.shape)
+    
+    @property
+    def class_distribution(self) -> Counter:
+        values_to_labels = dict( zip( self.encoding.values(), self.encoding.keys() ) )
+        return { 
+            values_to_labels.get(zero_one): count \
+                for zero_one, count in Counter( self.target ).items() }
+
+    def load_data(self, io):
+        super().load_data(io)
+        shape_x, shape_y = self.shape 
+        #fix target vector if some samples have been missed during data integration
+        if shape_x[0] < shape_y[0]:
+            self.target = self.target.loc[ self.data.index ]
 
 
     def __extract_validation_by_proportion(self, size: float, only: str) -> tuple:
@@ -292,8 +320,9 @@ class BinaryClfDataset(Dataset):
         try:
             subdata = self.__copy(features = features) 
         except KeyError: #cannot find features is df 
-            raise Exception(f"Cannot extract features from matrix:\n{features.features.tolist()}")
-
+            unfound_features = set(features.features).difference( self.data.columns )
+            raise Exception(f"Cannot find following features in data: {unfound_features}")
+            
         assert isinstance(subdata, BinaryClfDataset)
         return subdata
     
@@ -312,6 +341,7 @@ class BinaryClfDataset(Dataset):
         bcd.name = self.name 
         bcd.target = self.target[bcd.data.index].copy()  #extracts target values of samples present in the dataset 
         bcd.target_labels = self.target_labels
+        bcd.__target_name = self.__target_name
         
         return bcd 
         
@@ -328,8 +358,12 @@ class BinaryClfDataset(Dataset):
 
         return self 
     
-    def save(self, outpath, target_name = "target"):
-        self.data[target_name] = self.target
+    def save(self, outpath): # , target_name = "target"):
+        target_name = self.__target_name if self.__target_name else "target"
+        #rebuild original target values 
+        self.data[target_name] = self.target.replace( dict( 
+            zip( self.encoding.values(), self.encoding.keys() )))
+
         super().save(outpath)
         self.data.drop(columns=[target_name], inplace=True)
 

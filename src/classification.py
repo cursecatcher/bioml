@@ -257,7 +257,10 @@ class AldoRitmoClassificazione:
 
                     # print(f"Current row:\n{row}\n")
 
-                    ci_values[ clf ] = row["CI 95%"].iloc[0]
+                    # print(row)
+
+                    #ci_values[ clf ] = row["CI 95%"].iloc[0]
+                    ci_values[ clf ]  = row["std"].iloc[0]
 
                     for y_pred in data.get("prob_predicted"):
                         fpr, tpr, _ = roc_curve(true_y, y_pred)
@@ -347,13 +350,14 @@ if __name__ == "__main__":
 
     dataset.name = "training set"
     if args.more_data:
+        logging.info("Integrating more data:")
         for more in args.more_data:
             dataset.load_data( more )
 
-    logging.info(f"Training set loaded: {dataset.shape}")
+    logging.info(f"Training set loaded: {dataset.shape} ==> {dataset.class_distribution}")
 
-    (num_samples, num_features), _ = dataset.shape 
-    logging.info(f"Training set loaded. Number of samples: {num_samples} described by {num_features} features.")
+    (num_samples, num_features), stuff = dataset.shape 
+    logging.info(f"Training set loaded. Number of samples: {num_samples} described by {num_features} features. {stuff}")
 
     #load feature lists 
     feature_lists = utils.load_feature_lists( args.feature_lists )
@@ -376,6 +380,8 @@ if __name__ == "__main__":
             #extract by sampling 
             dataset, validation_data = dataset.extract_validation_set(size = args.vsize, only = args.only)
 
+            logging.info(f"Training/test split completed: {dataset.class_distribution} / {validation_data.class_distribution}.")
+
         #set validation name as the input dataset used for training 
         validation_data.name = os.path.basename(args.input_data)  
         
@@ -395,7 +401,7 @@ if __name__ == "__main__":
             curr_vset = ds.BinaryClfDataset( vs, args.target,  pos_labels=args.pos_labels, neg_labels=args.neg_labels )
             curr_vset.name = os.path.basename(vs)
 
-            logging.info(f"Initial shape: {curr_vset.shape}")
+            logging.info(f"Initial shape: {curr_vset.shape} ==> {curr_vset.class_distribution}")
 
             validation_sets.append( curr_vset )
         
@@ -423,7 +429,8 @@ f"""#####################################################\t\tQUICK REPORT:
 * Validation sets: {', '.join( vs.name for vs in validation_sets )}
 * Num runs: {args.trials}
 * Num fold CV: {args.ncv}
-""")
+* Size test set: {args.vsize}
+##################################################### """)
 
 
     #process one feature list at the time 
