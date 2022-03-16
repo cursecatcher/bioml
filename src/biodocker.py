@@ -11,6 +11,7 @@ INPUT_DATA = "input_data"
 MORE_DATA = "more_data"
 FEATURE_LISTS = "feature_lists"
 VALIDATION_SETS = "validation_sets"
+RULES_LISTS = "rules"
 VALID_SAMPLES_ID = "vid"
 
 
@@ -21,9 +22,10 @@ def get_parser(prog: str) -> argparse.ArgumentParser:
     #parent output folder where to save all results
     parser.add_argument("-o", "--outfolder", type=str, required=False)         #IGNORED - it's here just to catch that argument
     parser.add_argument("-i", f"--{INPUT_DATA}", type=str, required=True)      #input dataset 
-    parser.add_argument("-m", f"--{MORE_DATA}", type=str, required=False)      #additional data to integrate in the input dataset
+    parser.add_argument("-m", f"--{MORE_DATA}", type=str, nargs="*")      #additional data to integrate in the input dataset
     parser.add_argument("-f", f"--{FEATURE_LISTS}", type=str, nargs="+")       #list of feature lists 
     parser.add_argument("-v", f"--{VALIDATION_SETS}", type=str, nargs="*")     #list of validation sets
+    parser.add_argument("-r", f"--{RULES_LISTS}", type=str, nargs="*")         #list of rule sets (only used by XAI module)
 
     parser.add_argument(f"--{VALID_SAMPLES_ID}", type=str, required=False)     #list of samples to be used as validation set 
 
@@ -41,8 +43,10 @@ def format_args(io_args: dict) -> list:
 
     actual_input = io_args.pop(INPUT_DATA)
     argstr.append( f"--{INPUT_DATA} {actual_input[0]}")
-    if len(actual_input) == 2:                          #get additional data, if provided 
-        argstr.append( f"--{MORE_DATA} {actual_input[1]}")
+    if len(actual_input) > 1:
+        #get additional data, if provided 
+        more_data = " ".join( actual_input[1:] )
+        argstr.append( f"--{MORE_DATA} {more_data}")
 
     #add feature lists and independent validation sets
     argstr.extend([ 
@@ -51,6 +55,30 @@ def format_args(io_args: dict) -> list:
                 if len(files) ])
 
     return argstr
+
+def get_script(args):
+    operations = args.clf, args.fsel, args.xai 
+    nop_selected = sum([bool(op) for op in operations])
+
+    if nop_selected != 1:
+        if nop_selected == 0:
+            print("No operation selected", file=sys.stderr) 
+        else:
+            print("Just one operation at the time", file=sys.stderr) 
+
+        sys.exit("Please select an operation:\n- classification: --clf\n- feature selection: --fsel\nexplainable ml: --xai")
+
+    sourcefolder = "/bioml"
+
+    if args.clf:
+        script = "classification.py"
+    if args.fsel:
+        script = "feature_selection.py"
+    if args.xai:
+        script = "explainable.py"
+    
+    return os.path.join( sourcefolder, script )
+
     
 
 
@@ -59,8 +87,9 @@ if __name__ == "__main__":
     parser.add_argument("-d", "--docker_outfolder", type=str, required=True)
     parser.add_argument("--container_name", type=str, required=False)
 
-    parser.add_argument("--clf", action="store_true")
-    parser.add_argument("--fsel", action="store_true")
+    parser.add_argument("--clf", action="store_true")   # run evaluation 
+    parser.add_argument("--fsel", action="store_true")  # run feature selection
+    parser.add_argument("--xai", action="store_true")   # run explainable
     parser.add_argument("--rm", action="store_true")
 
     parser.add_argument("--verbose", action="store_true")
@@ -73,15 +102,22 @@ if __name__ == "__main__":
     #training set 
     input_files[INPUT_DATA] = [ str(args.input_data) ]
     if args.more_data:
-        input_files[INPUT_DATA].append( str(args.more_data) )
+        input_files[INPUT_DATA].extend( args.more_data )
+       # input_files[INPUT_DATA].append( str(args.more_data) )
 
     #feature lists & validation sets 
-    input_files[FEATURE_LISTS] = list(args.feature_lists)
+    if args.feature_lists:
+        input_files[FEATURE_LISTS] = list(args.feature_lists)
+        
     if args.validation_sets:
         input_files[VALIDATION_SETS] = list(args.validation_sets)
     if args.vid:
         #optional parameter for classification
         input_files[VALID_SAMPLES_ID] = [ args.vid ]
+    
+    #rule lists 
+    if args.xai and args.rules:
+        input_files[RULES_LISTS] = list( args.rules )
 
 
     my_files = dict()
@@ -93,17 +129,7 @@ if __name__ == "__main__":
         wrong_files = [f for f, b  in my_files.items() if not b]
         sys.exit(f"ERROR: some input file has not been found:\n{wrong_files}")
 
-
-    too_much, not_enough = all(operations), not any(operations)
-
-    if too_much or not_enough:
-        if too_much:
-            print("Just one operation at the time", file=sys.stderr)
-        else:
-            print("No operation selected", file=sys.stderr)
-
-        sys.exit("Please select an operation:\n- classification: --clf\n- feature selection: --fsel")
-    
+    pyscript = get_script( args )
 
     #parse args, create docker outfolder
     docker_outfolder = os.path.abspath( args.docker_outfolder )
@@ -147,7 +173,6 @@ if __name__ == "__main__":
 
     formatted_args = format_args(new_files_collection)
     cidfile = os.path.join(docker_outfolder, 'dockerID')
-    script = "feature_selection.py" if args.fsel else "classification.py"
 
     docker_run.append(f"docker run -d --cidfile {cidfile} -v {docker_outfolder}:/data")
     
@@ -160,7 +185,7 @@ if __name__ == "__main__":
         docker_run.append(f"--name {args.container_name}")
     
     image_tag = f":{args.tag}"
-    docker_run.append( f"cursecatcher/bioml{image_tag} {script} -o /data/{os.path.basename(args.docker_outfolder)}_results" ) #set output folder 
+    docker_run.append( f"cursecatcher/bioml{image_tag} {pyscript} -o /data/{os.path.basename(args.docker_outfolder)}_results" ) #set output folder 
     docker_run.append( " ".join(formatted_args) )
     
     if unknownargs:
@@ -169,7 +194,9 @@ if __name__ == "__main__":
 
 
     docker_command = " ".join(docker_run)    
-    with open(os.path.join(docker_outfolder, "COMMAND"), "w") as f:
+    print(docker_command)
+    
+    with open(os.path.join(docker_outfolder, "COMMAND.txt"), "w") as f:
         f.write(docker_command)
 
     print(f"Running the docker container:\n{docker_command}\n")
