@@ -5,6 +5,7 @@ import matplotlib.pyplot as plt
 import numpy as np 
 import os
 import pandas as pd
+from sklearn.linear_model import LogisticRegression
 
 from sklearn.model_selection import StratifiedKFold
 import sklearn.metrics as metrics 
@@ -241,13 +242,13 @@ class PipelineEvaluator:
     def test_clf_in_cv(self, clf, dataset: ds.BinaryClfDataset, folds: list, validation_sets: list):
         
         def fit_classifier(clf: ssz.Pipeline, class_weight: dict, X, y, clfname: str):
-            try:
-                #passing parameters to estimator.fit meethod at the end of sklearn.pipeline:
-                #https://stackoverflow.com/questions/36205850/sklearn-pipeline-applying-sample-weights-after-applying-a-polynomial-feature-t
-                fit_params = { f"{clfname}__sample_weight" : compute_sample_weight(class_weight, y) }
-                return sklearn_clone(clf).fit(X, y, **fit_params )
-            except TypeError as te:
-                return sklearn_clone(clf).fit(X, y)
+            # try:
+            #     #passing parameters to estimator.fit meethod at the end of sklearn.pipeline:
+            #     #https://stackoverflow.com/questions/36205850/sklearn-pipeline-applying-sample-weights-after-applying-a-polynomial-feature-t
+            #     fit_params = { f"{clfname}__sample_weight" : compute_sample_weight(class_weight, y) }
+            #     return sklearn_clone(clf).fit(X, y, **fit_params )
+            # except TypeError as te:
+            return sklearn_clone(clf).fit(X, y)
 
         clf_name = PipelineEvaluator.get_pipeline_name(clf).replace("scaler_", "")
         magic_plots = dict()
@@ -281,6 +282,7 @@ class PipelineEvaluator:
             # index_test_set.extend( dataset.data.iloc[idx_test].index )
             # true_y.extend( dataset.target.iloc[idx_test] )
             #run classifier against test set, saving predictions
+
             plot_test.run(
                 clf,
                 dataset.data.iloc[idx_test], 
@@ -406,7 +408,16 @@ class PipelineEvaluator:
 
         for name, obj in pipeline[-2:].named_steps.items():
             if name == "selector":
-                steps.append("kbest" if type(obj) is ssz.SelectKBest else "sfm")
+                if isinstance( obj, ssz.SelectKBest ):
+                    steps.append( "anova" )
+                elif isinstance( obj, ssz.SelectFromModel ):
+                    if isinstance( obj.estimator, LogisticRegression):
+                        steps.append( "sfLR" )
+                    else:
+                        steps.append( "sfRF" )
+                    # steps.append( "sfm" )
+                else:
+                    raise TypeError("Unrecognized feature selector.")
             else:
                 steps.append(name)
 

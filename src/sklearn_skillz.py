@@ -8,7 +8,7 @@ from sklearn.linear_model import \
     LogisticRegression, \
     SGDClassifier, \
     LassoCV
-from sklearn.naive_bayes import GaussianNB
+from sklearn.naive_bayes import GaussianNB, BernoulliNB
 from sklearn.svm import LinearSVC, SVC
 from sklearn.ensemble import \
     RandomForestClassifier, \
@@ -23,6 +23,7 @@ from sklearn.preprocessing import \
     StandardScaler, \
     RobustScaler, \
     MinMaxScaler
+from sklearn.discriminant_analysis import LinearDiscriminantAnalysis
 
 import utils 
 import logging
@@ -71,7 +72,7 @@ class FeatureSelector:
         elif hasattr(estimator, "feature_importances_"):
             feature_importances = estimator.feature_importances_
             importances = self.f_importance(feature_importances)
-    
+
         return importances
                 
 
@@ -87,7 +88,9 @@ class ClassifiersToEvaluate(enum.Enum):
     RANDOM_FOREST = ("r_forest", RandomForestClassifier)
     GRADIENT_BOOSTING = ("g_boost", GradientBoostingClassifier)
     SVMACHINE = ("svm", SVC)
-    # GAUSSIAN_NAIVE_BAYES = ("gaussian_nb", GaussianNB)
+    # LDA = ("lda", LinearDiscriminantAnalysis)
+    GAUSSIAN_NAIVE_BAYES = ("gauss_nb", GaussianNB)
+    # BERNOULLI_NAIVE_BAYES = ("bern_nb", BernoulliNB)
 
     @classmethod
     def get_params(cls, clfcls):
@@ -105,7 +108,7 @@ class ClassifiersToEvaluate(enum.Enum):
         elif clfcls is SVC:
             args = dict( probability = True )
         
-        elif clfcls is GaussianNB:
+        elif clfcls is GaussianNB or clfcls is BernoulliNB:
             pass 
         
         else:
@@ -170,28 +173,36 @@ class FeatureSelectionHyperParameters:
         )
 
 class ClassifiersHyperParameters:
+    
     @classmethod
     def get_params(cls, pipeline, max_features):
         """ Return a dictionary containing the hyperparameters 
         of the whole pipeline """ 
-
-        clf_params = {
-            LogisticRegression: cls.logisticRegressionParameters, 
-            LinearSVC: cls.svmParameters, 
-            RandomForestClassifier: cls.randomForestParameters, 
-            GradientBoostingClassifier: cls.gradientBoostingParameters, 
-            SGDClassifier: cls.sdgClassifierParameters,
-            SVC: cls.svmParameters,
-            GaussianNB: cls.gaussianNBClassifierParameters
-        }
         # get estimator's hyperparameters
-        estimator_t = type(pipeline[-1])
-        clf_hp = clf_params[estimator_t]()        
+        params = {
+            LogisticRegression: ClassifiersHyperParameters.logisticRegressionParameters, 
+            LinearSVC: ClassifiersHyperParameters.svmParameters, 
+            RandomForestClassifier: ClassifiersHyperParameters.randomForestParameters, 
+            GradientBoostingClassifier: ClassifiersHyperParameters.gradientBoostingParameters, 
+            SGDClassifier: ClassifiersHyperParameters.sdgClassifierParameters,
+            SVC: ClassifiersHyperParameters.svmParameters,
+            GaussianNB: ClassifiersHyperParameters.gaussianNBClassifierParameters, 
+            BernoulliNB: ClassifiersHyperParameters.bernoulliNBClassifierParameters, 
+            LinearDiscriminantAnalysis: ClassifiersHyperParameters.linearDiscriminantAnalysisParameters
+        }
+        clf_hp = params[ type( pipeline[-1] ) ]()        
         # get the hyperparameters of the rest of the pipeline 
         fs_hp = FeatureSelectionHyperParameters.get_params(pipeline, max_features)
 
         return {**fs_hp, **clf_hp}
 
+    @classmethod
+    def linearDiscriminantAnalysisParameters(cls):
+        return dict()
+
+    @classmethod
+    def bernoulliNBClassifierParameters(cls):
+        return dict()
 
     @classmethod
     def gaussianNBClassifierParameters(cls):
@@ -293,27 +304,61 @@ class KBestEstimator(AbstractPipeline):
             ("selector", SelectKBest(k=k))]
         )
 
-
-
-class FromModelEstimator(AbstractPipeline):
-    def __init__(self, dataset, k = None):
-        estimator = LogisticRegression(max_iter=10000)
-        if k is None:
-            super().__init__(dataset, [
-                ("var_threshold", VarianceThreshold()),
-                ("scaler", StandardScaler()), 
-                ("selector", SelectFromModel(estimator))
-            ])
-        else:
-            super().__init__(dataset, [
-                ("var_threshold", VarianceThreshold()),
-                ("scaler", StandardScaler()), 
-                ("selector", SelectFromModel(estimator, max_features=k, threshold=-np.inf))
-            ])
-
 class EstimatorWithoutFS(AbstractPipeline):
     def __init__(self, dataset):
         super().__init__(dataset, [
             ("var_threshold", VarianceThreshold()), 
             ("scaler", StandardScaler())
         ])
+
+
+
+
+class FromModelEstimator(AbstractPipeline):
+    def __init__(self, dataset, estimator, k = None):
+        self.__estimator = estimator
+
+        sfm_params = dict( estimator = estimator )
+        if k:
+            sfm_params = dict( 
+                ** sfm_params, max_features = k, threshold = -np.inf )
+
+        super().__init__(dataset, [
+            ("var_threshold", VarianceThreshold()),
+            ("scaler", StandardScaler()), 
+            ("selector", SelectFromModel( ** sfm_params ))
+        ])
+    
+    @property
+    def estimator( self ):
+        return self.__estimator
+
+class FromLogisticEstimator( FromModelEstimator ):
+    def __init__(self, dataset, k=None):
+        estimator = LogisticRegression(max_iter=10000)
+        super().__init__( dataset, estimator, k )
+
+class FromRandomForestEstimator( FromModelEstimator ):
+    def __init__(self, dataset, k=None):
+        estimator = RandomForestClassifier(n_estimators=50)
+        super().__init__( dataset, estimator, k )
+
+
+
+
+class PipelineNamesUtility:
+    def __init__(self) -> None:
+        self.__mapping = {
+            SelectKBest: "anova", 
+            FromLogisticEstimator: "sfLR",
+            FromRandomForestEstimator: "sfRF"
+        }
+    
+    def get_model_name(self, selector: AbstractPipeline):
+        return self.__mapping.get( selector )
+
+    def get_model_from_name(self, clf_name: str):
+        for model, string in self.__mapping.items():
+            if string in clf_name:
+                return model 
+
