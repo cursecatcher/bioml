@@ -1,6 +1,5 @@
 #!/usr/bin/env python3 
 
-from statistics import mode
 import numpy as np 
 import pandas as pd 
 
@@ -19,7 +18,7 @@ from sklearn.decomposition import PCA
 import rules 
 
 
-import from_rules as fr 
+import explainable as fr 
 import utils
 import logging
 logging.basicConfig(level=utils.logginglevel)
@@ -200,30 +199,64 @@ class ClusterRules:
         args = dict(x="f1", y="f2", hue="cluster", palette="deep", ax=ax1)   ##common args for centroids and points plotting 
 
         ## plot centroids 
-        sns.scatterplot(data = centroids_df, marker="^", s=100, legend=False, **args)
+        #sns.scatterplot(data = centroids_df, marker="^", s=100, legend=False, **args)
         ## plot points  
-        sns.scatterplot(data = pca_df, style="target", s=30, **args)
+        # sns.scatterplot(data = pca_df, style="target", s=30, **args)
+        sns.scatterplot(data = pca_df, x="f1", y="f2", hue="target", style="cluster", s=30, palette="deep", ax=ax1)
 
         #FIX LEGEND 
-        ax1.legend(loc="upper right")
+        # ax1.legend(loc="upper right")
+        ax1.get_legend().remove()
         ax1.set_xlabel("First Principal Component")
         ax1.set_ylabel("Second Principal Component")
         ## plot class distributions in clusters 
 
-        # clusters = pca_df.groupby( "cluster" ).count().reset_index() 
-        positives, total = self.__stacked_barplot( 
-            pca_df,             #data
-            "cluster",          #x-axis
-            pca_df.target == 1    )
-
-        sns.barplot(data=total, x="cluster",  y="count", color='darkblue', ax=ax2)
-        sns.barplot(data=positives, x="cluster", y="count",  color='lightblue', ax=ax2)
+        pca_df["count"] = 1
+        agg_clusters = pca_df.groupby(by=["cluster", "target"])["count"].sum().unstack().fillna(0)
         
+        bottom = np.zeros( len(agg_clusters) )
 
-        # add legend
-        top_bar = mpatches.Patch(color='darkblue', label='Target = 0')
-        bottom_bar = mpatches.Patch(color='lightblue', label='Target = 1')
-        ax2.legend(handles=[top_bar, bottom_bar], loc="upper right")
+        map2legend = { 0: "Healthy", 1: "CRC"}
+
+        for i, col in enumerate( agg_clusters.columns ):
+            ax2.bar( agg_clusters.index, agg_clusters[col], bottom=bottom, label=map2legend.get(col))
+            bottom += np.array( agg_clusters[col] )
+
+        totals = agg_clusters.sum(axis=1)
+        y_offset = 0.5
+
+        for i, total in enumerate( totals ):
+            ax2.text( totals.index[i], total + y_offset, round(total), ha="center", weight="bold")
+
+        ax2.set_xticks( range(0, self.num_clusters ) )
+        ax2.legend(loc="upper right")
+        ax2.set_title("Class proportion per cluster")
+        
+        # ax.bar( agg_clusters.index, )
+
+
+        # if "willie peyote" == "fascista":
+        #     # ax2.bar(agg_clusters.index, agg_clusters[0], label="neg")
+        # # ax2.bar(agg_clusters.index, agg_clusters[1], bottom=agg_clusters[0], label="pos")
+        #     # print(f"########### {self.model.n_clusters}:")
+        #     # print(robe)
+
+        #     # clusters = pca_df.groupby( "cluster" ).count().reset_index() 
+        #     positives, total = self.__stacked_barplot( 
+        #         pca_df,             #data
+        #         "cluster",          #x-axis
+        #         pca_df.target == 1    )
+
+
+            
+        #     sns.barplot(data=total, x="cluster",  y="count", color='darkblue', ax=ax2)
+        #     sns.barplot(data=positives, x="cluster", y="count",  color='lightblue', ax=ax2)
+            
+
+        #     # add legend
+        #     top_bar = mpatches.Patch(color='darkblue', label='Target = 0')
+        #     bottom_bar = mpatches.Patch(color='lightblue', label='Target = 1')
+        #     ax2.legend(handles=[top_bar, bottom_bar], loc="upper right")
         # plt.show()
         return fig, (ax1, ax2)
     
@@ -244,32 +277,56 @@ class ClusterRules:
 
     def cluster_correlation(self, dataset: fr.DataRuleSet):
         samples = dataset.ruledata.copy() #pd.DataFrame( data = dataset.ruledata.target, index = dataset.ruledata.index, columns=[dataset.TARGET]  ) 
-        samples["cluster"] = self.model.predict( samples.drop( columns = [dataset.TARGET]).to_numpy() )
+        samples["cluster"] = self.model.predict( samples.drop( columns = [dataset.TARGET] ).to_numpy() )
         norule_cols = [dataset.TARGET, "cluster"]
         cols = norule_cols + [ r for r in samples.columns.tolist() if r not in norule_cols ]
         samples = samples[ cols ]
 
-        vs_target = list()
+        #ith element will contain the correlations between rules and (target|rules) within ith cluster
+        vs_target = list()          
+        rules_vs_rules = list()
 
-        fig, axes = utils.plt.subplots(1, self.num_clusters)
-        fig.set_size_inches(20, 18)
+
+        # fig, axes = utils.plt.subplots(1, self.num_clusters)
+        # fig.set_size_inches(20, 18)
 
         for nc in range( self.num_clusters ):
             which = samples[ samples.cluster == nc].index 
             # print(f"######### Cluster {nc} has {len(which)} elements")
             
+            #get cluster population
             tmp = dataset.extract_samples( which )
-            tmp.phi_correlation_rules( axes.flat[nc] )
+            #compute rule vs rule correlation
+            rules_vs_rules.append( tmp.phi_correlation_rules() )
+            # put_colorbar = nc == self.num_clusters - 1
+            # rules_vs_rules.append( tmp.phi_correlation_rules( ax = axes.flat[nc], cbar = put_colorbar ) )
+            #compute rule vs target correlation 
+            vs_target.append( tmp.phi_correlation_target() )        
+        
 
-            vs_target.append( tmp.phi_correlation_target() )
+        # print(f"List vs target: {len(vs_target)}\nList vs rules: {len(rules_vs_rules)}")
+        # print(vs_target)
 
-        ret = dict( phi_clusters = (fig, axes) )
+
+        corr_target = pd.concat( vs_target, axis = 1 )
+        corr_target.columns = [ f"phi_cl{i}" for i in range( self.num_clusters ) ]
+
+        return dict( corr_target = corr_target, corr_rules = rules_vs_rules )
+
+
+        ret = dict( 
+        #    phi_clusters = (fig, axes), 
+            corr_target = vs_target, 
+            corr_rules = rules_vs_rules )
 
         fig, ax = utils.plt.subplots()
         fig.set_size_inches(10, 10)
+
+        heatmatrix = pd.concat( vs_target, axis=1).to_numpy() 
+
         sns.heatmap( 
-            pd.concat(vs_target, axis=1).to_numpy(), 
-            vmin=-1, vmax=1, ax = ax)
+            np.abs( heatmatrix ), xticklabels=False, yticklabels=False,
+            vmin=0, vmax=1, ax = ax)
             
         ret["phi_target"] = fig, ax 
 
@@ -432,7 +489,8 @@ class ClusterSignature:
 
 
 class RulesClusterer:
-#    def __init__(self, dataset: rules.RuleDataset, max_n_clusters: int):
+    """ Perform clustering using up to N clustering """
+
     def __init__(self, dataset: fr.DataRuleSet, max_n_clusters: int):
         self.__num_clusters = max_n_clusters
 
@@ -541,7 +599,6 @@ class RulesClusterer:
 
 
     def cluster_viz(self, dataset: fr.DataRuleSet, outfile: str = None) -> list:
-        # list of (fig, ax) tuples 
         figures_and_stuff = list(
             map( lambda m: m.clusters_viz( dataset, self.pca ), self.__models)
         )
@@ -558,11 +615,12 @@ class RulesClusterer:
 
         return figures_and_stuff
 
-    def rule_discovery(self, dataset: fr.DataRuleSet):
-        for model in self.__models:
-            stuff = model.rule_discovery( dataset )
 
-            print(stuff)
+    # def rule_discovery(self, dataset: fr.DataRuleSet):
+    #     for model in self.__models:
+    #         stuff = model.rule_discovery( dataset )
+
+    #         print(stuff)
 
     
 
@@ -622,333 +680,3 @@ class RulesClusterer:
 
         return samples 
 
-
-
-
-
-
-# class RuleClustering:
-#     # def __init__(self, dataset: ds.Dataset, max_n_clusters) -> None:
-#     def __init__(self, dataset: rules.RuleDataset, max_n_clusters: int) -> None:
-#         self.max_n_clusters = max_n_clusters
-#         # self.dataset = dataset
-
-#         #define column ordering:
-#         train_data = dataset.ruledata.drop(columns=["target"])
-#         train_data = train_data.reindex(sorted(train_data.columns), axis=1)
-#         self.features = list(train_data.columns)
-#         self.pca = PCA(2).fit( train_data.to_numpy() )
-
-#         self.elbow_points = list()
-#         self.clustering_models = list() 
-#         self.silhouettes = list() 
-
-
-#         for nc in range(1, max_n_clusters + 1):
-#             self.clustering_models.append(
-#                 kmodes.KModes(n_clusters=nc, init="Cao", n_init=10).fit( train_data ))
-            
-#             km = self.clustering_models[-1]
-#             self.elbow_points.append( km.cost_ )
-#             preds = km.predict( train_data ) # dataset.data )
-
-#             if nc > 1:
-#                 score = silhouette_score(train_data, preds)  #(dataset.data, preds)
-#                 print(f"Silhouette score for {nc} clusters = {score}")
-#                 sample_silhouette_values = silhouette_samples(train_data, preds) #  (dataset.data, preds)
-
-#                 silhouette_dict = dict(
-#                     score = score, 
-#                     cluster_scores = list(), 
-#                     y_lim = len(dataset.ruledata) + (nc + 1) * 10 )
-
-#                 y_lower = 10
-#                 for i in range(nc):
-#                     ith_cluster_silhouette_values = sample_silhouette_values[ preds == i ]
-#                     ith_cluster_silhouette_values.sort() 
-
-#                     size_cluster_i = ith_cluster_silhouette_values.shape[0]
-#                     y_upper = y_lower + size_cluster_i 
-
-#                     color = cm.nipy_spectral(float(i) / nc)
-
-#                     silhouette_dict.get("cluster_scores").append(dict(
-#                         cluster_silhouette_values = ith_cluster_silhouette_values, 
-#                         cluster_size = size_cluster_i, 
-#                         y_values = (y_lower, y_upper), 
-#                         color4plot = color 
-#                     ))
-
-#                     y_lower = y_upper + 10 
-            
-#                 self.silhouettes.append( silhouette_dict )
-
-#                 # print(silhouette_dict)
-#                 # print("\n\n\n")
-#         print(self.silhouettes)
-#         raise Exception()
-
-
-#     def cluster_silhouettes(self):
-#         max_n_clusters = len(self.clustering_models)
-#         fig, axes = plt.subplots(2, max_n_clusters // 2 )
-#         fig.set_size_inches(20, 10)
-#         fig.suptitle(f"Silhouette plot up to {max_n_clusters} clusters")
-
-#         for nc, s_info in enumerate(self.silhouettes, 2):
-#             ax = axes.flat[nc - 2]
-
-#             ax.set_xlim([-.1, 1])
-#             ax.set_ylim([0, s_info.get("y_lim")])
-
-#             for i, ce in enumerate( s_info.get("cluster_scores") ):
-#                 y_lower, y_upper = ce.get("y_values")
-#                 ith_cluster_silhouette_values = ce.get("cluster_silhouette_values")
-#                 color = ce.get("color4plot")
-
-#                 ax.fill_betweenx(
-#                     np.arange(y_lower, y_upper), 0, 
-#                     ith_cluster_silhouette_values, 
-#                     facecolor=color, edgecolor=color, alpha=.7)
-                    
-#                 ax.text(-.05, y_lower + .5 * ce.get("cluster_size"), str(i+1))
-            
-#             ax.set_title(f"Silhouettes for {nc} clusters: {s_info.get('score'):.3f}")
-#             ax.set_xlabel("Silhouette coefficient values")
-#             ax.set_ylabel("Cluster label")
-
-#             ax.axvline(x=s_info.get("score"), color="red", linestyle="--")
-#             ax.set_yticks([])
-#             ax.set_xticks([-.1, 0, .2, .4, .6, .8, 1])
-
-#         return fig, axes
-
-
-#     def elbow_plot(self):
-#         fig, ax = plt.subplots()
-#         fig.set_size_inches(20, 10)
-    
-#         df = pd.DataFrame([
-#             (n, sc) for n, sc in enumerate( self.elbow_points, 1 )
-#         ], columns=["num clusters", "score"])
-
-#         sns.lineplot(data = df, x="num clusters", y="score", ax=ax)
-#         fig.suptitle("Elbow Plot")
-
-#         return fig, ax 
-
-
-
-#     def cluster_signatures(self, dataset: rules.RuleDataset):
-#         signs = dict(pos=1, neg=-1)
-#         all_signatures = list()
-
-#         rule_map = None 
-
-#         for num_clusters, km in enumerate(self.clustering_models, 1):
-#             ccp, eval = self.rule_discovery(dataset, num_clusters)
-
-#             eval.sort_index(inplace=True, kind="mergesort")
-#             # the_rules = ["N", "nc"] + list(eval.index.drop_duplicates())
-
-#             if rule_map is None:
-#                 rule_map = {
-#                    rule: f"r{i + 1}" for i, rule \
-#                        in enumerate( eval.index.drop_duplicates().tolist() )    }
-            
-#             signatures = [
-#                 [num_clusters, nc,  *[  #exploding the list -> saving tuples of length |R| + 2
-#                     signs.get(row.rule_sign) * row.coverage \
-#                         for _, row in subdf.iterrows() ] ] \
-#                     for nc, subdf in eval.groupby("cluster")        ]
-
-#             #put cluster centroids in the signature (signature cluster i, signature centroid i)
-#             signatures =  reduce(concat,  [ 
-#                 (s[:2] + list(c), s) \
-#                     for s, c in zip(signatures, km.cluster_centroids_)  ])
-                        
-#             column_names = ["N", "nc"] + list(rule_map.values())
-
-#             all_signatures.append(
-#                 pd.DataFrame(signatures, columns = column_names) )
-            
-            
-
-#         fig, axes = plt.subplots(2, (len(all_signatures) + 1) // 2)
-#         fig.set_size_inches(18,7)
-#         rules = list( rule_map.values() )
-
-
-
-#         for i, signature in enumerate(all_signatures):
-#             ax = axes.flat[i]
-#             sns.heatmap(signature[ rules ], annot=True, fmt=".2f", ax=ax)
-#             ax.set_title(f"{i+1} cluster signatures")
-        
-#         return fig, axes 
-
-#         # plt.show()
-
-#         # raise Exception()
-            
-
-   
-
-
-
-#     # def rule_discovery(self, dataset: rules.RuleDataset, num_clusters: int) -> tuple:
-#     def rule_discovery(self, dataset: fr.DataRuleSet, num_clusters: int) -> tuple:
-#         km = self.clustering_models[num_clusters - 1]
-#         # centroids = km.cluster_centroids_ 
-
-#         rule_data = dataset.ruledata.copy()
-#         rule_data["cluster"] = km.predict( rule_data.drop(columns=["target"]) )
-        
-#         original_data = dataset.bcd.data#.copy() 
-#         original_data["target"] = rule_data.target 
-#         original_data["cluster"] = rule_data.cluster
- 
-#         num_pos = rule_data.target.sum()
-#         num_neg = len(rule_data.target) - num_pos
-
-#         cluster_composition = [
-#             rule_data[rule_data.cluster == i] for i in range(num_clusters)]
-
-#         #first element is the class proportion of the whole dataset
-#         cluster_class_proportions = [ (num_pos, num_neg) ]
-
-
-#         #show cluster composition: pos/neg 
-#         for i, elements in enumerate(cluster_composition):
-#             pos_in_cluster = elements.target.sum() 
-#             neg_in_cluster = len(elements.target) - pos_in_cluster
-
-#             #i-th element, i > 0, is the class proportion of the i-th cluster 
-#             cluster_class_proportions.append( (pos_in_cluster, neg_in_cluster) )
-
-#             # print(f"Cluster {i} => p: {pos_in_cluster}, n: {neg_in_cluster}")
-#             # print(f"Fraction of positives: {pos_in_cluster / num_pos}")
-#             # print(f"Fraction of negatives: {neg_in_cluster / num_neg}")
-
-
-#         rule_evaluations = list() 
-
-#         for rule in dataset:#  my_rules:
-#             rule_results = list() 
-
-#             for i, elements in enumerate(cluster_composition):
-#                 srule = str(rule)
-#                 #how many times rule activates in i-th cluster
-#                 #row: truth value given by rule evaluation on i-th sample
-#                 #col: truth value given by the actual label on i-th sample (supervised stuff)
-#                 contingency_matrix = np.zeros((2,2))
-    
-#                 for _, row in elements[[srule, "target"]].iterrows():
-#                     contingency_matrix[ int(row[srule]), int(row.target) ] += 1
-                
-#                 #valuto la regola sui sample dell'i-esimo cluster 
-#                 evaluation = rule.eval( original_data[ original_data.cluster == i ] )
-#                 evaluation["cluster"] = i 
-
-#                 rule_results.append( ( contingency_matrix, evaluation ) )
-
-#             matricies, evals = zip(*rule_results)
-#             # eval_df = 
-#             # eval_df.sort_values("cluster", inplace=True)
-
-#             rule_evaluations.append( pd.concat(evals).sort_values("cluster") )
-#             # print(rule_evaluations[-1])
-
-#         return (cluster_class_proportions, pd.concat(rule_evaluations, axis=0))
-
-
-#     def cluster_viz(self, dataset: rules.RuleDataset, num_clusters: int):
-#         km = self.clustering_models[num_clusters - 1]
-
-#         data_without_target = dataset.ruledata.drop(columns=["target"])
-#         data_without_target = data_without_target.reindex(sorted(data_without_target.columns), axis=1) 
-
-#         pca_df = pd.DataFrame(
-#             self.pca.transform( data_without_target.to_numpy() ), 
-#             index=dataset.ruledata.index, 
-#             columns=["f1", "f2"])
-#         pca_df["target"] = dataset.ruledata.target 
-#         pca_df["cluster"] = km.predict(data_without_target)
-
-
-#         centroids_df = pd.DataFrame(
-#             self.pca.transform(km.cluster_centroids_),
-#             columns=["f1", "f2"])
-#         centroids_df["cluster"] = range(0, num_clusters)
-
-
-#         fig, (ax1, ax2) = plt.subplots(1,2)
-
-#         args = dict(x="f1", y="f2", hue="cluster", palette="deep", ax=ax1)   ##common args for centroids and points plotting 
-
-#         ## plot centroids 
-#         sns.scatterplot(data = centroids_df, marker="^", s=100, legend=False, **args)
-#         ## plot points  
-#         sns.scatterplot(data = pca_df, style="target", s=30, **args)
-
-#         #FIX LEGEND 
-#         ax1.legend(loc="upper right")
-#         ax1.set_xlabel("First Principal Component")
-#         ax1.set_ylabel("Second Principal Component")
-#         ## plot class distributions in clusters 
-
-#         # clusters = pca_df.groupby( "cluster" ).count().reset_index()
-#         pca_df["count"] = 1 
-#         total = pca_df.groupby( "cluster" )["count"].sum().reset_index()    
-#         positives = pca_df[ pca_df.target == 1 ].groupby("cluster")["count"].sum().reset_index()
-
-#         positives['count'] = [i / j  for i,j in zip(positives['count'], total['count'])]
-#         total['count'] = [i / j  for i,j in zip(total['count'], total['count'])]
-
-#         sns.barplot(data=total, x="cluster",  y="count", color='darkblue')
-#         sns.barplot(data=positives, x="cluster", y="count",  color='lightblue')
-
-#         # add legend
-#         top_bar = mpatches.Patch(color='darkblue', label='Target = 0')
-#         bottom_bar = mpatches.Patch(color='lightblue', label='Target = 1')
-#         ax2.legend(handles=[top_bar, bottom_bar], loc="upper right")
-#         plt.show()
-#         return fig, (ax1, ax2)
-
-
-
-
-#     def cluster_composition(self, dataset: rules.RuleDataset, num_clusters: int, outfilename: str):
-#         km = self.clustering_models[num_clusters - 1]
-
-#         my_data = dataset.ruledata.copy() 
-#         my_data["cluster"] = km.predict( my_data.drop(columns=["target"]) )
-
-#         with matplotlib.backends.backend_pdf.PdfPages( outfilename ) as pdf:
-#             for rule in dataset: 
-#                 rule = str(rule)
-#                 if rules.enable_plot:
-#                     fig, (ax1, ax2, ax3) = plt.subplots(1, 3)
-#                     fig.set_size_inches(20, 7)
-#                     fig.suptitle(f"Rule: {rule}")
-
-
-#                     sns.countplot(x="cluster", hue="target", data=my_data, ax=ax1)
-#                     sns.countplot(x="cluster", hue=rule, data=my_data, ax=ax2)
-#                     sns.countplot(x="target", hue=rule, data=my_data, ax=ax3)            
-
-#                     ax1.set_title("Class distribution in clusters")
-#                     ax2.set_title("Rule activation in clusters")
-#                     ax3.set_title("Rule activation w.r.t. target")
-#                     #sarebbe carino mettere un titolo al plot 
-
-#                     pdf.savefig( fig )
-#                     plt.close()
-
-
-def make_clustering(dataset, max_clusters, features):
-    ds = dataset.extract_subrules( features ) if features else dataset
-    
-    return  RulesClusterer( ds, max_clusters )
-    
-    
