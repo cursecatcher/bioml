@@ -345,7 +345,7 @@ class PipelineEvaluator:
             features["mean"] = means
             # save dataframe ranking features from the best to the worse (based on average score)
             features.sort_values(by="mean", ascending=False).to_csv(
-                path_or_buf = os.path.join(feature_folder, pipeline_name + ".csv"), 
+                path_or_buf = os.path.join(feature_folder, pipeline_name + ".tsv"), 
                 sep="\t", 
                 decimal=",", 
                 float_format="%.3g", 
@@ -409,13 +409,19 @@ class PipelineEvaluator:
         for name, obj in pipeline[-2:].named_steps.items():
             if name == "selector":
                 if isinstance( obj, ssz.SelectKBest ):
-                    steps.append( "anova" )
+
+                    if obj.get_params().get("score_func") is ssz.f_classif:
+                        steps.append( "anova" )
+                    else:
+                        steps.append( "entropy" )
+
                 elif isinstance( obj, ssz.SelectFromModel ):
+
                     if isinstance( obj.estimator, LogisticRegression):
                         steps.append( "sfLR" )
                     else:
                         steps.append( "sfRF" )
-                    # steps.append( "sfm" )
+                        
                 else:
                     raise TypeError("Unrecognized feature selector.")
             else:

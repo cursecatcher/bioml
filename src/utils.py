@@ -1,9 +1,10 @@
 import argparse, os
 
+import datetime, string
 from sklearn import metrics
 import dataset as ds 
 import pandas as pd 
-from sklearn.metrics import classification_report
+from sklearn.metrics import classification_report, matthews_corrcoef
 import numpy as np, scipy.stats as st 
 from statsmodels.graphics.gofplots import qqplot
 import matplotlib.pyplot as plt 
@@ -20,6 +21,18 @@ def make_folder(starting_folder: str, new_foldername: str):
     if not os.path.exists(complete_path):
         os.makedirs(complete_path)
     return complete_path
+
+
+def build_session_directory( starting_path: str ):
+    translator = str.maketrans(
+        string.punctuation, 
+        '_' * len(string.punctuation)   )
+    this_precise_moment = str( datetime.datetime.now() )\
+            .translate( translator )\
+            .replace(" ", "__") #*which now is passed :( )
+    new_folder = make_folder( starting_path, this_precise_moment)
+    return new_folder, this_precise_moment
+
 
 def load_feature_lists(starting_folders: list):
     feature_lists = list() 
@@ -41,6 +54,7 @@ def nice_classification_report(y_true, y_pred, target_names: list) -> dict:
     }
     nice_report["accuracy"] = bad_report.get("accuracy")
     nice_report["cohen-kappa"] = metrics.cohen_kappa_score( y_true, y_pred )
+    nice_report["MCC"] = metrics.matthews_corrcoef( y_true, y_pred )
 
     return nice_report
 

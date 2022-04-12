@@ -1,6 +1,6 @@
 #!/usr/bin/env python3 
 
-import datetime, string
+from math import expm1
 import os, sys
 
 from matplotlib.pyplot import draw
@@ -13,6 +13,9 @@ import pandas as pd
 import dataset as ds 
 from rules import *
 import clustering as clu 
+
+import matplotlib.pyplot as plt 
+import seaborn as sns 
 
 import numpy as np 
 import matplotlib.backends.backend_pdf 
@@ -39,6 +42,25 @@ class Explainable:
             self.__all_data["test"] = test_set
 
 
+    def dump_rules(self, filename):
+        self.__rselector.save_selected( filename )
+
+
+    def check_data(self, rule_lists: list ):
+        tsall_right, feature_set = True, set() 
+
+        for rulelist in rule_lists:
+            feature_set.update( rulelist.features )
+
+        for name, data in self.__all_data.items():
+            columns = set( data.data.columns.str.replace(" ", "_").str.lower().tolist() )
+            intersect = feature_set.intersection( columns )
+            if intersect != feature_set:
+                missing = feature_set.difference( intersect )
+                logging.error(f"Features missing in {name}:\n{' '.join(missing)}")
+                tsall_right = False 
+
+        return tsall_right
 
     def rule_mining(self, flist: ds.FeatureList, n_trials : int) -> RuleMiner:
         miner = RuleMiner( self.__training, flist )
@@ -72,10 +94,10 @@ class Explainable:
 
 
     def rule_selection(self, initial_rules: RuleList, n_out_rules: int):
+
         #build rules as features 
         self.__training.add_rules( initial_rules.rules )
-        # trset = self.__training.copy()
-        # trset.add_rules( initial_rules.rules )
+        
         #select rules based on performance on training set 
         self.__rselector = RuleSelector( initial_rules.rules )
         self.__rselected = self.__rselector.selection( self.__training, n_out_rules )
@@ -106,7 +128,10 @@ class Explainable:
         return clu.RulesClusterer( ds, max_clusters )
 
     
-    def classification_via_rules(self, outfolder: str, rules = None):
+    def classification_via_rules(
+            self, outfolder: str, rules = None, 
+            n_replic = 5, ncv = 5):
+
         iterable = self.__rselected if rules is None else rules 
         if iterable is None:
             iterable = self.__training
@@ -117,31 +142,134 @@ class Explainable:
             data.bcd for _, data in self.__all_data.items()
         ]
 
-        
         arc = AldoRitmoClassificazione(
-                dataset = self.__training.bcd, 
-                flist = features, 
-                outfolder=outfolder)\
+                dataset = self.__training.bcd, flist = features, outfolder=outfolder)\
             .evaluate( 
-                n_replicates=30, 
-                n_folds=5, 
-                validation_sets = vsets )
+                n_replicates = n_replic, n_folds = ncv, validation_sets = vsets )
+
         arc.write_classification_report()
         arc.write_samples_report()
         arc.build_ci()
         arc.plot_roc_curves()
 
 
+    def sample_clustering(self, clusterized, clustering_folder ):
+        sample_clustering_filename = "sample_clustering.xlsx"
 
-def build_session_directory( starting_path: str ):
-    translator = str.maketrans(
-        string.punctuation, 
-        '_' * len(string.punctuation)   )
-    this_precise_moment = str( datetime.datetime.now() )\
-            .translate( translator )\
-            .replace(" ", "__") #*which now is passed :( )
-    new_folder = utils.make_folder( starting_path, this_precise_moment)
-    return new_folder, this_precise_moment
+        with pd.ExcelWriter( os.path.join( clustering_folder, sample_clustering_filename)  ) as xlsx:
+            for name, data in self.get_data():
+                clusterized.clusterize_data( data ).to_excel( xlsx, sheet_name = name)
+                
+
+    def clustering_metrics(self, clusterized, clustering_folder ):
+        clustering_metrics_filename = "cluster_metrics.pdf"
+        outfilename = os.path.join( clustering_folder, clustering_metrics_filename )
+
+        with matplotlib.backends.backend_pdf.PdfPages( outfilename ) as pdf:
+            silh_plot, _ = clusterized.cluster_silhouettes()
+            elbow_plot, _ = clusterized.elbow_plot()
+
+            for plot in (silh_plot, elbow_plot):
+                pdf.savefig(plot)
+                utils.plt.close(plot)
+
+
+    def cluster_signatures(self, clusterized, clustering_folder ):
+        for name, subdata in self.get_data():
+            clusterized.signatures( subdata, os.path.join( clustering_folder, f"cluster_signatures_{name}.pdf"))
+
+
+    def cluster_visualization(self, clusterized, clustering_folder ):
+        for name, subdata in self.get_data():
+            clusterized.cluster_viz( subdata, os.path.join( clustering_folder, f"cluster_signatures_{name}.pdf"))
+ 
+
+    def cluster_correlation(self, clusterized, clustering_folder):
+        def write2pdf(figure, title, dest):
+            figure.suptitle( title )
+            figure.tight_layout()
+            dest.savefig( figure )
+            plt.close( figure )
+
+
+        for ncl in range(1, clusterized.max_num_clusters + 1):
+            matrix_target, matrix_rules = dict(), dict() 
+
+            for name, subdata in self.get_data():
+                correlations = clusterized.correlation( subdata, ncl )
+
+                matrix_target[ name ] = correlations.get("corr_target")
+                matrix_rules[ name ] = correlations.get("corr_rules")
+
+            ### save raw correlation matrices
+            curr_filename = f"correlations_{ncl}_clusters.xlsx"
+            with pd.ExcelWriter( os.path.join( clustering_folder, curr_filename ) ) as xlsx:
+                for key in matrix_rules.keys():
+                    matrix_target[ key ].to_excel( xlsx, sheet_name = f"target_{key}")
+
+                    for i, corr_matrix in enumerate( matrix_rules[ key ] ):
+                        corr_matrix.to_excel( xlsx, sheet_name = f"rules_cl{i+1}_r{key}")
+            
+            pdf_filename = f"heatmaps_{ncl}_clusters.pdf"
+            with matplotlib.backends.backend_pdf.PdfPages( os.path.join( clustering_folder, pdf_filename) ) as pdf:
+                for key in matrix_rules.keys():
+                    data2heat = matrix_target.get( key ).sort_index() 
+                    write2pdf(
+                        figure = rule_vs_target_heatmap( data2heat ), 
+                        title = f"Rule vs target: {key}", 
+                        dest = pdf
+                    )
+
+                for key in matrix_rules.keys():
+                    corr_matrices = matrix_rules.get(key)
+                    write2pdf(
+                        figure = rule_vs_rule_heatmap( corr_matrices ), 
+                        title = f"Rules vs rules: {key}", 
+                        dest = pdf
+                    )
+
+
+                
+    def consume_rules(self, rulelist: RuleList, outfolder: str, max_nc: int, r_max: int = None, r_min: int = None):
+        if not r_max or r_max > len(rulelist):
+            r_max = len(rulelist)
+        if not r_min or r_min < 2:
+            r_min = 2
+        if r_max < r_min:
+            r_min = r_max
+
+        for n in range( r_max, r_min - 1, -1):
+            #get top n rules 
+            logging.info(f"Performing rule stuff expecting {n} rules... ")
+            curr_rules = self.rule_selection( rulelist, n )
+
+            logging.info(f"Considering {len(curr_rules)} rules right now.")
+
+            print(curr_rules.rules)
+
+            #perform classification task using n rules as features 
+            self.classification_via_rules( 
+                outfolder, curr_rules, n_replic=10, ncv = 5 )
+
+            #perform unsupervised clustering up to m clusters 
+            clusterized = self.make_clustering( max_nc )
+            clustering_folder = utils.make_folder(
+                outfolder,  f"cluster_{len(curr_rules)}rules")
+
+            # clustering prediction for nc = 1, 2, ... m 
+            self.sample_clustering( clusterized, clustering_folder )
+
+            self.clustering_metrics( clusterized, clustering_folder )
+
+            self.cluster_signatures( clusterized, clustering_folder )
+
+            self.cluster_visualization( clusterized, clustering_folder )
+
+            self.cluster_correlation( clusterized, clustering_folder )
+
+
+
+
 
 
 
@@ -158,144 +286,204 @@ def prova_ruleselection(corr_target, corr_rules):
         squared = cluster_corr.loc[ survived_rules ][ survived_rules ]
         thresholded = np.abs( squared ) < 0.5
 
-
     return RuleList( survived_rules )
 
 
-def xclustering( 
-        xai: Explainable, 
-        rulelist: RuleList, 
-        outfolder: str, 
-        max_nclusters: int,
-        rmax: int = None, rmin: int = None):
+# def xclustering( 
+#         xai: Explainable, 
+#         rulelist: RuleList, 
+#         outfolder: str, 
+#         max_nclusters: int,
+#         rmax: int = None, rmin: int = None, 
+#         n_rep = 10, ncv = 10):
 
-    rmax = rmax if rmax else len( rulelist )
-    rmin = rmin if rmin else 2
+#     rmax = rmax if rmax and rmax <= len(rulelist) else len( rulelist )
+#     rmin = rmin if rmin else 2
 
-    rulez_outfolder = utils.make_folder( outfolder, f"mined_from_{rulelist.name}" )
+#     rulez_outfolder = utils.make_folder( outfolder, f"mined_from_{rulelist.name}" )
+#     xai.rule_selection( rulelist, rmax )
+#     xai.dump_rules( os.path.join( rulez_outfolder, "rule_selection.tsv") )
 
-    for n in range( rmax, rmin - 1, -1):
-        rulez = xai.rule_selection( rulelist, n )
-        actual_len = len(rulez) #is expected to be n 
-        print(f"Working with {rulez.name} having {actual_len} rules: ")
-        with open( os.path.join( rulez_outfolder, f"rulelist_{actual_len}f.txt"), "w" ) as f:
-            f.write(f"rulelist_{actual_len}\n")
-            f.writelines( [  f"{rule}\n" for rule in rulez  ] )
+#     for n in range( rmax, rmin - 1, -1):
+#         rulez = xai.rule_selection( rulelist, n )
+#         actual_len = len(rulez) #is expected to be n 
+#         print(f"Working with {rulez.name} having {actual_len} rules: ")
+#         with open( os.path.join( rulez_outfolder, f"rulelist_{actual_len}f.txt"), "w" ) as f:
+#             f.write(f"rulelist_{actual_len}\n")
+#             f.writelines( [  f"{rule}\n" for rule in rulez  ] )
 
-        xai.classification_via_rules( outfolder )
+#         print(f"Classification VIA rules ...  ")
+#         if False:
+#             xai.classification_via_rules( outfolder, n_replic = 10, ncv = ncv)
 
-        if actual_len < 2:
-            logging.warning(f"Only one rule available -- clustering unavailable")
-            break
+#         if actual_len < 2:
+#             logging.warning(f"Only one rule available -- clustering unavailable")
+#             break
 
-        clusterized = xai.make_clustering( max_nclusters )
-        clustering_folder = utils.make_folder( outfolder, f"cluster_{actual_len}rules")
-        prefix_filename = os.path.join( clustering_folder, "")
+#         print(f"Clustering stuff VIA rules")
 
-        with pd.ExcelWriter( f"{prefix_filename}sample_clustering.xlsx" ) as xlsx:
-            for name, data in xai.get_data():
-                df = clusterized.clusterize_data( data )
-                df.to_excel( xlsx, sheet_name = name )
+#         clusterized = xai.make_clustering( max_nclusters )
+#         clustering_folder = utils.make_folder( outfolder, f"cluster_{actual_len}rules")
+#         prefix_filename = os.path.join( clustering_folder, "")
 
-        with matplotlib.backends.backend_pdf.PdfPages( f"{prefix_filename}cluster_metrics.pdf" ) as pdf:
-            silh_plot, _ = clusterized.cluster_silhouettes()
-            elbow_plot, _ = clusterized.elbow_plot()
+#         with pd.ExcelWriter( f"{prefix_filename}sample_clustering.xlsx" ) as xlsx:
+#             for name, data in xai.get_data():
+#                 df = clusterized.clusterize_data( data )
+#                 df.to_excel( xlsx, sheet_name = name )
 
-            for plot in (silh_plot, elbow_plot):
-                pdf.savefig(plot)
-                utils.plt.close(plot)
+#         with matplotlib.backends.backend_pdf.PdfPages( f"{prefix_filename}cluster_metrics.pdf" ) as pdf:
+#             silh_plot, _ = clusterized.cluster_silhouettes()
+#             elbow_plot, _ = clusterized.elbow_plot()
 
-        for name, subdata in explml.get_data():
-            clusterized.signatures( subdata,  f"{prefix_filename}clu_signature_{name}.pdf")  
-            clusterized.cluster_viz( subdata, f"{prefix_filename}clu_viz_{name}.pdf")
+#             for plot in (silh_plot, elbow_plot):
+#                 pdf.savefig(plot)
+#                 utils.plt.close(plot)
 
-        for ncl in range(1, max_nclusters + 1):
-            # hm_target, hm_rules_pair = dict(), dict()
-            matrix_target, matrix_rules = dict(), dict() 
+#         for name, subdata in explml.get_data():
+#             clusterized.signatures( subdata,  f"{prefix_filename}clu_signature_{name}.pdf")  
+#             clusterized.cluster_viz( subdata, f"{prefix_filename}clu_viz_{name}.pdf")
+            
 
-            for name, subdata in xai.get_data(): #reduced_data.items():
-                #plotz = clusterized.correlation( subdata, ncl )
-                correlations = clusterized.correlation( subdata, ncl )
+#         for ncl in range(1, max_nclusters + 1):
+#             # hm_target, hm_rules_pair = dict(), dict()
+#             matrix_target, matrix_rules = dict(), dict() 
 
-                matrix_target[name] = correlations.get("corr_target")
-                matrix_rules[name] = correlations.get("corr_rules")
+#             for name, subdata in xai.get_data(): #reduced_data.items():
+#                 #plotz = clusterized.correlation( subdata, ncl )
+#                 correlations = clusterized.correlation( subdata, ncl )
 
-            with pd.ExcelWriter( f"{prefix_filename}correlations_{ncl}clusters.xlsx" ) as xlsx:
-                for k in matrix_rules.keys():
-                    matrix_target[ k ].to_excel( xlsx, sheet_name = f"target_{k}")
+#                 matrix_target[name] = correlations.get("corr_target")
+#                 matrix_rules[name] = correlations.get("corr_rules")
 
-                    for i, corr_rules in enumerate( matrix_rules[ k ] ):
-                        corr_rules.to_excel( xlsx, sheet_name = f"rules_cl{i+1}_r{k}")
+#             with pd.ExcelWriter( f"{prefix_filename}correlations_{ncl}clusters.xlsx" ) as xlsx:
+#                 for k in matrix_rules.keys():
+#                     matrix_target[ k ].to_excel( xlsx, sheet_name = f"target_{k}")
 
-
-            with matplotlib.backends.backend_pdf.PdfPages( f"{prefix_filename}heatmaps_{ncl}clusters.pdf" ) as pdf:
-                ### plot rule vs target correlation heatmap for each dataset 
-                for k in matrix_rules.keys():
-                    fig, ax = plt.subplots()
-                    fig.set_size_inches(10, 10)
-
-                    heatdata = matrix_target.get(k).sort_index()
-                    rlist = [f"r{i}" for i, _  in enumerate( heatdata.index, 1)]
-                    cluster_list = list(range(1, heatdata.shape[1] + 1))
-
-                    heatmatrix = np.abs( heatdata.to_numpy() )
-                    vmin = -1 if heatmatrix.min() < 0 else 0
-                    vmax = +1 
-
-                    sns.heatmap(  
-                        heatmatrix, ax = ax, 
-                        vmin = vmin, vmax=vmax, xticklabels=cluster_list, yticklabels=rlist )
-
-                    ax.set_xlabel("Cluster")
-                    ax.set_ylabel("Rule")
-                    fig.suptitle(f"Rules vs target correlation: {k}")
-                    fig.tight_layout()
-                    pdf.savefig( fig )
-                    plt.close( fig )
-
-                ### plot rule vs rule correlation heatmap for each dataset 
-                for k in matrix_rules.keys():
-
-                    corr_matrices = matrix_rules.get(k)
-                    sample_matrix = corr_matrices[0]
-                    mask = np.zeros_like( sample_matrix )
-                    mask[np.triu_indices_from(mask)] = True 
-
-                    rlist = [ f"r{j}" for j, _ in enumerate( sample_matrix.columns, 1 ) ]
-
-                    vmin = 0 
-                    heatmap_args = dict( 
-                        mask = mask,                #triangular matrix 
-                        vmin = vmin, vmax = 1,        #
-                        xticklabels = rlist, 
-                        yticklabels = rlist )
+#                     for i, corr_rules in enumerate( matrix_rules[ k ] ):
+#                         corr_rules.to_excel( xlsx, sheet_name = f"rules_cl{i+1}_r{k}")
 
 
-                    if len(corr_matrices) == 1:
-                        fig, ax = plt.subplots() 
-                        target_matrix = corr_matrices[0].to_numpy()
-                        if vmin == 0:
-                            target_matrix = np.abs( target_matrix )
-                        sns.heatmap( target_matrix, ax = ax, **heatmap_args)
-                    else:
-                        fig, axes = plt.subplots(1, ncl)
-                        for i, m in enumerate( corr_matrices ):
-                            target_matrix = m.to_numpy()
-                            if vmin == 0:
-                                target_matrix = np.abs( target_matrix )
-                            draw_cbar = i == (ncl - 1)
-                            sns.heatmap( target_matrix, cbar = draw_cbar, ax = axes.flat[i], **heatmap_args )
+#             with matplotlib.backends.backend_pdf.PdfPages( f"{prefix_filename}heatmaps_{ncl}clusters.pdf" ) as pdf:
+#                 ### plot rule vs target correlation heatmap for each dataset 
+#                 for k in matrix_rules.keys():
+#                     fig, ax = plt.subplots()
+#                     # fig.set_size_inches(10, 10)
+
+#                     heatdata = matrix_target.get(k).sort_index()
+#                     rlist = [f"r{i}" for i, _  in enumerate( heatdata.index, 1)]
+#                     cluster_list = list(range(1, heatdata.shape[1] + 1))
+
+#                     heatmatrix = np.abs( heatdata.to_numpy() )
+#                     vmin = -1 if heatmatrix.min() < 0 else 0
+#                     vmax = +1 
+
+#                     sns.heatmap(  
+#                         heatmatrix, ax = ax, 
+#                         vmin = vmin, vmax=vmax, xticklabels=cluster_list, yticklabels=rlist )
+
+#                     ax.set_xlabel("Cluster")
+#                     ax.set_ylabel("Rule")
+#                     fig.suptitle(f"Rules vs target correlation: {k}")
+#                     fig.tight_layout()
+#                     pdf.savefig( fig )
+#                     plt.close( fig )
+
+#                 ### plot rule vs rule correlation heatmap for each dataset 
+#                 for k in matrix_rules.keys():
+
+#                     corr_matrices = matrix_rules.get(k)
+#                     sample_matrix = corr_matrices[0]
+#                     mask = np.zeros_like( sample_matrix )
+#                     mask[np.triu_indices_from(mask)] = True 
+
+#                     rlist = [ f"r{j}" for j, _ in enumerate( sample_matrix.columns, 1 ) ]
+
+#                     vmin = 0 
+#                     heatmap_args = dict( 
+#                         mask = mask,                #triangular matrix 
+#                         vmin = vmin, vmax = 1,        #
+#                         xticklabels = rlist, 
+#                         yticklabels = rlist )
 
 
-                    fig.suptitle(f"Rules vs rules correlation: {k}")
-                    fig.tight_layout()
-                    pdf.savefig( fig )
-                    plt.close( fig )
+#                     if len(corr_matrices) == 1:
+#                         fig, ax = plt.subplots() 
+#                         target_matrix = corr_matrices[0].to_numpy()
+#                         if vmin == 0:
+#                             target_matrix = np.abs( target_matrix )
+#                         sns.heatmap( target_matrix, ax = ax, **heatmap_args)
+#                     else:
+#                         fig, axes = plt.subplots(1, ncl)
+#                         for i, m in enumerate( corr_matrices ):
+#                             target_matrix = m.to_numpy()
+#                             if vmin == 0:
+#                                 target_matrix = np.abs( target_matrix )
+#                             draw_cbar = i == (ncl - 1)
+#                             sns.heatmap( target_matrix, cbar = draw_cbar, ax = axes.flat[i], **heatmap_args )
 
 
+#                     fig.suptitle(f"Rules vs rules correlation: {k}")
+#                     fig.tight_layout()
+#                     pdf.savefig( fig )
+#                     plt.close( fig )
 
-                
 
+def prepare_matrix_data( df: pd.DataFrame, min_value: int ) -> np.ndarray:
+    np_matrix = df.to_numpy()
+    return np.abs( np_matrix ) if min_value == 0 else np_matrix
+
+
+def rule_vs_rule_heatmap( matrices: list ):
+    num_clusters = len(matrices)
+    sample_matrix = matrices[0]
+    mask = np.zeros_like( sample_matrix )
+    mask[ np.triu_indices_from( mask ) ] = True 
+
+    rlist = [ f"r{i}" for i, _ in enumerate( sample_matrix.columns, 1) ]
+    vmin = 0
+    heatmap_args = dict( 
+        mask = mask,                
+        vmin = vmin, vmax = 1, 
+        xticklabels = rlist, yticklabels = rlist
+    )
+
+    if len(matrices) > 1:
+        fig, axes = plt.subplots(1,  num_clusters )
+        for i, m in enumerate( matrices ):
+            target_matrix = prepare_matrix_data( m, vmin )
+            draw_cbar = i == (num_clusters - 1)
+            sns.heatmap( target_matrix, cbar = draw_cbar, ax = axes.flat[i], **heatmap_args )
+    else:
+        fig, ax = plt.subplots()
+        target_matrix = prepare_matrix_data( sample_matrix, vmin )
+
+        sns.heatmap( target_matrix, ax = ax, **heatmap_args )
+    
+    return fig 
+    
+
+
+def rule_vs_target_heatmap( data2heat: pd.DataFrame ):
+    rlist = [ f"r{i}" for i, _ in enumerate( data2heat.index, 1) ]
+    cluster_list = list( range(1, data2heat.shape[1] + 1))
+
+    vmin = 0 
+    target_matrix = prepare_matrix_data( data2heat, vmin )
+
+    fig, ax = plt.subplots()
+
+    sns.heatmap(
+        target_matrix, 
+        vmin = vmin, vmax = +1, 
+        xticklabels=cluster_list, yticklabels=rlist, 
+        ax = ax
+    )
+
+    ax.set_xlabel("Cluster ID")
+    ax.set_ylabel("Rule")
+
+    return fig
+    
 
 
 
@@ -304,7 +492,7 @@ if __name__ == "__main__":
     parser = utils.get_parser("From Rules")
 
     parser.add_argument("--vsize", type=float, default=0.1)
-    parser.add_argument("-r", "--rules", type=str, nargs="*", required=False) # enable mining if rules file is not provided
+    parser.add_argument("-r", "--rules", type=str, nargs="*", required=False, default=list()) # enable mining if rules file is not provided
     parser.add_argument("--max_nc", type=int, default=6)
 
     parser.add_argument("--r_min", type=int, default=2)
@@ -314,7 +502,7 @@ if __name__ == "__main__":
 
 
     #build output folder 
-    outfolder, this_precise_moment = build_session_directory( args.outfolder )
+    outfolder, this_precise_moment = utils.build_session_directory( args.outfolder )
 
     max_n_clusters = args.max_nc 
     the_rules = args.rules
@@ -347,26 +535,25 @@ if __name__ == "__main__":
         initial_dataset.name = f"tr_set"
         explml = Explainable( initial_dataset )
 
-    rulesets = list() 
-
+    rulesets = args.rules 
 
     ## load feature lists and perform mining on them 
     if args.feature_lists:
         #load feature lists and perform rule mining 
         feature_lists = utils.load_feature_lists( args.feature_lists )
-        mined_rulesets = [ explml.rule_mining( flist, args.trials ) for flist in feature_lists ]
 
-        for mined_rules in mined_rulesets:
-            rulesets.append( mined_rules.get_rules() )
-            mined_rules.save( outfolder=outfolder )
+        for flist in feature_lists:
+            logging.info(f"Mining rules using features: {flist}")
+            miner = explml.rule_mining( flist, args.trials )
+            outfile = miner.save( outfolder = outfolder )
+            rulesets.append( outfile )
+
     
     ## load rule lists and do nothing in particular, just storiing them 
-    if args.rules:
-        rulesets.extend([ RuleList( rf ) for rf in args.rules  ])
-#        rulesets.append( RuleList( args.rules )  )
+    assert rulesets
+    rulesets = [ RuleList( rf ) for rf in rulesets ]
 
     ## load independent validation set if provided 
-    # valids = list() 
     if args.validation_sets:
         for vset in args.validation_sets:
             vdata = DataRuleSet( io = vset, ** args_bclf_dataset )
@@ -375,10 +562,27 @@ if __name__ == "__main__":
             explml.add_validation_set( vdata )
 
 
+    if not explml.check_data( rulesets ):
+        sys.exit( "ERROR: at least one feature appearing in a rule is missing in the data. Aborted. " )
+
+
+    ntrials = args.trials 
+    if ntrials == 1:
+        ntrials += 1
+
     for the_rules in rulesets:
-        xclustering( 
-            explml,             ## all the data 
-            the_rules,          ## current rules 
-            utils.make_folder( outfolder, the_rules.name ),  #the output folder for current rules 
-            args.max_nc, args.r_max, args.r_min )           # clustering and rules arguments 
+
+        rmax = args.r_max
+        rmin = args.r_min 
+
+        outfolder_curr_rules = utils.make_folder( 
+            outfolder, f"minedFrom_{the_rules.name}" )
+        
+        explml.rule_selection( the_rules, rmax )
+        explml.dump_rules( os.path.join( outfolder_curr_rules, "rule_evaluation.tsv" ))
+
+        explml.consume_rules( 
+            the_rules, outfolder_curr_rules, args.max_nc,
+            rmax, rmin )
+
 

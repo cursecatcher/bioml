@@ -1,6 +1,5 @@
 #!/usr/bin/env python3 
 
-
 import numpy as np
 import pandas as pd 
 import dataset as ds 
@@ -87,6 +86,8 @@ class Descriptive:
         self.__scaler = StandardScaler()
         self.__dimred = PCA(2)
 
+        self.__dslist = list()
+
     def fit(self, tr_set: ds.BinaryClfDataset):
         self.__data = tr_set.extract_subdata( self.__flist )
 
@@ -98,11 +99,22 @@ class Descriptive:
         self.__dimred.fit( input_matrix )
         return self 
     
+    def correlation(self):
+        nfigs = len( self.__dslist )
+        fig, axes = plt.subplots(nfigs // 2 + nfigs % 2, 2)
+        for i, dataset in enumerate( self.__dslist ):
+            corr = dataset.data.corr()
+            sns.heatmap(corr, 
+                xticklabels=corr.columns,
+                yticklabels=corr.columns, ax = axes.flat[i] )
+        plt.show()
+
 
     def report(self, dataset: ds.BinaryClfDataset, outfolder: str):
         ###plot pcaed dataset 
 
         reduced_dataset = dataset.extract_subdata( self.__flist )
+        self.__dslist.append( reduced_dataset )
 
         input_matrix = self.__scaler.transform( reduced_dataset.data.to_numpy() )
         pca_data = pd.DataFrame(
@@ -140,35 +152,23 @@ class Descriptive:
             pdf.savefig( fig )
             plt.close( fig )
 
-        self.write_descriptive( describes )
+        self.write_descriptive( 
+            describes, 
+            os.path.join( outfolder, "descriptive.xlsx" )
+        )
 
 
 
 
-    def write_descriptive(self, descriptives: dict):
+    def write_descriptive(self, descriptives: dict, outpath: str):
         all_data = descriptives.get("all")
         neg_data, pos_data = [ descriptives.get(f"target_{i}") for i in range(2) ]
 
-        with pd.ExcelWriter("pino.xlsx") as xlsx:
+        with pd.ExcelWriter( outpath ) as xlsx:
             all_data.to_excel( xlsx, sheet_name = "ALL" )
             neg_data.to_excel( xlsx, sheet_name = "NEG CLASS")
             pos_data.to_excel( xlsx, sheet_name = "POS CLASS")
 
-
-
-
-
-
-
-        # df = reduced_dataset.data.copy() 
-        # df["target"] = reduced_dataset.target
-
-        # for feature in self.__flist.features:
-        #     fig, ax = plt.subplots()
-        #     sns.violinplot(data = df)
-        #     plt.show()
-        #     plt.close(fig)
-            
 
 
 
@@ -211,8 +211,11 @@ if __name__ == "__main__":
         descr.report( dataset, outfolder )
 
 
+
         for vset in validation_sets:
+            # print(vset)
             descr.report( vset, args.outfolder  )
 
+        descr.correlation()
 
 

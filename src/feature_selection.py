@@ -196,8 +196,14 @@ class FeaturesSearcher:
             logging.info(f"Progress: {k}/{ntot_f}")
 
             #get pipelines 
-        #    estimators = [ssz.KBestEstimator, ssz.FromModelEstimator]
-            estimators = [ssz.KBestEstimator, ssz.FromLogisticEstimator, ssz.FromRandomForestEstimator]
+            # estimators = [ssz.KBestEstimator, ssz.FromLogisticEstimator, ssz.FromRandomForestEstimator]
+            estimators = [
+                # ssz.KBestEstimator, 
+                ssz.ANOVAEstimator,
+                ssz.MIEstimator, 
+                ssz.FromLogisticEstimator, 
+                ssz.FromRandomForestEstimator ]
+                
             pipelines = reduce(operator.concat, [ 
                 [*map(lambda x: x[0], e(df, k).get_pipelines())] for e in estimators ])
 
@@ -248,6 +254,7 @@ class FeaturesSearcher:
             fcounts = Counter(df.to_numpy().flatten())
             if fcounts.get(np.nan):
                 del fcounts[np.nan]
+                
             selected = sorted([x for x, _ in fcounts.most_common(k)])
             return pd.Series(selected)
 
@@ -278,6 +285,7 @@ class FeaturesSearcher:
                                 it.best_features[clf_name]["mean"].sort_values(ascending=False).index \
                                     for it in result_run    
                             ])
+
                                 
                         feature_importances = pd.DataFrame(data=[x.to_series().tolist() for x in chosen_features])
                         feature_selected[selector][k] = feature_importances

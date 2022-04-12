@@ -15,6 +15,7 @@ import matplotlib.patches as mpatches
 import seaborn as sns 
 
 from sklearn.decomposition import PCA
+from sklearn_som.som import SOM
 import rules 
 
 
@@ -35,6 +36,13 @@ class ClusterRules:
         self.model = kmodes\
             .KModes(n_clusters=num_clusters, init="Cao", n_init=13)\
             .fit( train_data )
+
+        # Build a Nx1 SOM (N clusters)
+        # print(train_data)
+        # self.som = SOM(m = num_clusters, n = 1, dim = train_data.shape[1] )
+        # self.som.fit( train_data.to_numpy() )
+
+
     
     @property
     def centroids(self):
@@ -141,41 +149,6 @@ class ClusterRules:
         return (cluster_class_proportions, pd.concat(rule_evaluations, axis=0))
 
 
-    def __stacked_barplot(self, df_data, column, pos_condition):
-            count = f"count"
-            df_data[ count ] = 1
-            total = df_data.groupby(column)[ count ].sum().reset_index()
-            positives = df_data[ pos_condition ].groupby(column)[ count ].sum().reset_index()
-
-            return positives, total
-
-            # positives[ "total_counts" ] = total[ count ]
-
-            # positives[ "percentage" ] = [i / j  for i,j in zip(positives[ count ], total[ count ])]
-            # positives[ "total_percentage" ] = [i / j  for i,j in zip(total[ count ], total[ count ])]
-
-            # print(positives)
-
-            # print("     ################")
-            # print(positives)
-            positive_counts, total_counts = positives.copy(), total.copy()
-
-            counts = positives.copy()
-            counts["total_counts"] = total[ count ].copy()
-
-            positives[ count ] = [i / j  for i,j in zip(positives[ count ], total[ count ])]
-            total[ count ] = [i / j  for i,j in zip(total[ count ], total[ count ])]
-
-            # return counts, percentuals
-            positives["total_counts"] = total[ count ]
-
-
-            #return number of total and positive, percentage
-
-            return positives, total  #counts, positives
-
-            # return (positives, total)
-
 
     def clusters_viz(self, dataset: fr.DataRuleSet, pca: PCA): 
         data_without_target = dataset.ruledata.drop(columns=["target"])
@@ -186,26 +159,28 @@ class ClusterRules:
             index=dataset.ruledata.index, 
             columns=["f1", "f2"])
         pca_df["target"] = dataset.ruledata.target 
-        pca_df["cluster"] = self.model.predict(data_without_target)
 
-        centroids_df = pd.DataFrame(
-            pca.transform(self.model.cluster_centroids_),
-            columns=["f1", "f2"])
-        centroids_df["cluster"] = range(0, self.num_clusters)
+
+        pca_df["cluster"] = self.model.predict(data_without_target)
+        # pca_df["cluster"] = self.som.predict( data_without_target.to_numpy() )
+
+
+        # centroids_df = pd.DataFrame(
+        #     pca.transform(self.model.cluster_centroids_),
+        #     columns=["f1", "f2"])
+        # centroids_df["cluster"] = range(0, self.num_clusters)
 
 
         fig, (ax1, ax2) = plt.subplots(1,2)
 
-        args = dict(x="f1", y="f2", hue="cluster", palette="deep", ax=ax1)   ##common args for centroids and points plotting 
+        # args = dict(x="f1", y="f2", hue="cluster", palette="deep", ax=ax1)   ##common args for centroids and points plotting 
 
         ## plot centroids 
-        #sns.scatterplot(data = centroids_df, marker="^", s=100, legend=False, **args)
+        # sns.scatterplot(data = centroids_df, marker="^", s=100, legend=False, **args)
         ## plot points  
         # sns.scatterplot(data = pca_df, style="target", s=30, **args)
         sns.scatterplot(data = pca_df, x="f1", y="f2", hue="target", style="cluster", s=30, palette="deep", ax=ax1)
 
-        #FIX LEGEND 
-        # ax1.legend(loc="upper right")
         ax1.get_legend().remove()
         ax1.set_xlabel("First Principal Component")
         ax1.set_ylabel("Second Principal Component")
@@ -216,7 +191,7 @@ class ClusterRules:
         
         bottom = np.zeros( len(agg_clusters) )
 
-        map2legend = { 0: "Healthy", 1: "CRC"}
+        map2legend = dict( zip( dataset.encoding.values(), dataset.encoding.keys() ) ) 
 
         for i, col in enumerate( agg_clusters.columns ):
             ax2.bar( agg_clusters.index, agg_clusters[col], bottom=bottom, label=map2legend.get(col))
@@ -232,32 +207,6 @@ class ClusterRules:
         ax2.legend(loc="upper right")
         ax2.set_title("Class proportion per cluster")
         
-        # ax.bar( agg_clusters.index, )
-
-
-        # if "willie peyote" == "fascista":
-        #     # ax2.bar(agg_clusters.index, agg_clusters[0], label="neg")
-        # # ax2.bar(agg_clusters.index, agg_clusters[1], bottom=agg_clusters[0], label="pos")
-        #     # print(f"########### {self.model.n_clusters}:")
-        #     # print(robe)
-
-        #     # clusters = pca_df.groupby( "cluster" ).count().reset_index() 
-        #     positives, total = self.__stacked_barplot( 
-        #         pca_df,             #data
-        #         "cluster",          #x-axis
-        #         pca_df.target == 1    )
-
-
-            
-        #     sns.barplot(data=total, x="cluster",  y="count", color='darkblue', ax=ax2)
-        #     sns.barplot(data=positives, x="cluster", y="count",  color='lightblue', ax=ax2)
-            
-
-        #     # add legend
-        #     top_bar = mpatches.Patch(color='darkblue', label='Target = 0')
-        #     bottom_bar = mpatches.Patch(color='lightblue', label='Target = 1')
-        #     ax2.legend(handles=[top_bar, bottom_bar], loc="upper right")
-        # plt.show()
         return fig, (ax1, ax2)
     
 
@@ -270,10 +219,6 @@ class ClusterRules:
 
         return data_clusterized
 
-        # centroids_df = pd.DataFrame(
-        #     pca.transform(self.model.cluster_centroids_),
-        #     columns=["f1", "f2"])
-        # centroids_df["cluster"] = range(0, self.num_clusters)
 
     def cluster_correlation(self, dataset: fr.DataRuleSet):
         samples = dataset.ruledata.copy() #pd.DataFrame( data = dataset.ruledata.target, index = dataset.ruledata.index, columns=[dataset.TARGET]  ) 
@@ -285,10 +230,6 @@ class ClusterRules:
         #ith element will contain the correlations between rules and (target|rules) within ith cluster
         vs_target = list()          
         rules_vs_rules = list()
-
-
-        # fig, axes = utils.plt.subplots(1, self.num_clusters)
-        # fig.set_size_inches(20, 18)
 
         for nc in range( self.num_clusters ):
             which = samples[ samples.cluster == nc].index 
@@ -303,124 +244,13 @@ class ClusterRules:
             #compute rule vs target correlation 
             vs_target.append( tmp.phi_correlation_target() )        
         
-
-        # print(f"List vs target: {len(vs_target)}\nList vs rules: {len(rules_vs_rules)}")
-        # print(vs_target)
-
-
         corr_target = pd.concat( vs_target, axis = 1 )
         corr_target.columns = [ f"phi_cl{i}" for i in range( self.num_clusters ) ]
 
         return dict( corr_target = corr_target, corr_rules = rules_vs_rules )
 
 
-        ret = dict( 
-        #    phi_clusters = (fig, axes), 
-            corr_target = vs_target, 
-            corr_rules = rules_vs_rules )
 
-        fig, ax = utils.plt.subplots()
-        fig.set_size_inches(10, 10)
-
-        heatmatrix = pd.concat( vs_target, axis=1).to_numpy() 
-
-        sns.heatmap( 
-            np.abs( heatmatrix ), xticklabels=False, yticklabels=False,
-            vmin=0, vmax=1, ax = ax)
-            
-        ret["phi_target"] = fig, ax 
-
-        return ret 
-
-
-    def clusters_composition(self, dataset: fr.DataRuleSet):
-        def countplot(data, x, hue, ax, condition = None):
-            if condition is None:
-                condition = data[hue] == 1
-            pos, tot = self.__stacked_barplot(data, x, condition )
-            sns.barplot(data=tot, x=x, y="count", color="darkblue", ax=ax)
-            sns.barplot(data=pos, x=x, y="count", color="lightblue", ax=ax)
-
-            return pos, tot 
-
-
-        my_data = dataset.ruledata.copy() 
-        my_data["cluster"] = self.model.predict( my_data.drop(columns=[dataset.TARGET]).to_numpy() )
-
-        for rule in dataset:
-            srule = str(rule)
-
-            fig, (ax1, ax2, ax3) = plt.subplots(1, 3)
-            fig.set_size_inches(20, 7)
-            fig.suptitle(f"Rule: {rule}")
-
-
-            pos1 = countplot(x="cluster", hue="target", data=my_data, ax=ax1)
-            ax1.set_title("Class distribution in clusters")
-            # ax1.legend(loc="upper right")
-
-            ax2.set_title("Rule activation in clusters")
-            pos2 = countplot(x="cluster", hue=srule, data=my_data, ax=ax2)
-            ax2.legend(loc="upper right")
-            # pos2["rule"] = srule
-
-            ax3.set_title("Rule activation w.r.t. target")
-            pos3 = countplot(
-                data = my_data, 
-                x = "cluster", 
-                hue=None, 
-                ax=ax3, 
-                condition= (my_data[srule] == my_data[ "target" ])  )
-            
-            ax3.legend(loc="upper right")
-
-
-            # pos, tot = self.__stacked_barplot(
-            #     df_data = my_data, 
-            #     column="cluster", 
-            #     pos_condition= (my_data[srule] == my_data[ "target" ]))
-            # sns.barplot(data=tot, x="cluster", y="count", color="red", ax=ax3)
-            # sns.barplot(data=pos, x="cluster", y="count", color="green", ax=ax3)
-
-            # ax3.set_title("Rule activation w.r.t. target")
-            # pos3, tot = countplot(x="target", hue=srule, data=my_data, ax=ax3)            
-            # pos3["rule"] = srule 
-
-            plt.legend()
-            yield (fig, (ax1, ax2, ax3))
-
-            # plt.show()
-            # plt.close(fig)
-
-
-            
-
-
-
-    # def get_signatures(self, dataset: rules.RuleDataset):
-    #     return ClusterSignature( self, dataset )
-
-
-    #     signs = dict(pos=1, neg=-1)
-    #     ccp, eval = self.rule_discovery( dataset )
-    #     eval.sort_index(inplace=True, kind="mergesort")
-    #     #replace rules with placeholders 
-    #     rule_map = {
-    #         rule: f"r{i+1}" for i, rule in enumerate(self.features) }
-
-    #     signatures = [
-    #         [self.num_clusters, nc,  *[  #exploding the list -> saving tuples of length |R| + 2
-    #             signs.get(row.rule_sign) * row.coverage \
-    #                 for _, row in subdf.iterrows() ] ] \
-    #             for nc, subdf in eval.groupby("cluster")        ]
-        
-    #     #put cluster centroids in the signature (signature cluster i, signature centroid i)
-    #     signatures =  reduce(concat,  [ 
-    #         (s[:2] + list(c), s) \
-    #             for s, c in zip(signatures, self.centroids)  ])
-                    
-    #     column_names = ["N", "nc"] + list(rule_map.values())
-    #     return pd.DataFrame(signatures, columns = column_names)#, rule_map
 
 
 
@@ -511,6 +341,10 @@ class RulesClusterer:
 
             if nc > 1:
                 self.silhouettes.append( km.silhouettes( train_data ) )
+
+    @property
+    def max_num_clusters(self):
+        return self.__num_clusters
 
     
     def correlation(self, dataset: fr.DataRuleSet, num_clusters = None):
@@ -656,14 +490,14 @@ class RulesClusterer:
             yield m
 
 
-    def cluster_composition(self, dataset: fr.DataRuleSet, outfilename: str):
+    # def cluster_composition(self, dataset: fr.DataRuleSet, outfilename: str):
 
-        for model in self.__models[1:]:
-            print(f"Exploring model w/ {model.num_clusters}... \n")
-            with matplotlib.backends.backend_pdf.PdfPages( f"{outfilename}_nc{model.num_clusters}.pdf" ) as pdf:
-                for fig, axes in model.clusters_composition( dataset ):
-                    pdf.savefig( fig )
-                    plt.close( fig )
+    #     for model in self.__models[1:]:
+    #         print(f"Exploring model w/ {model.num_clusters}... \n")
+    #         with matplotlib.backends.backend_pdf.PdfPages( f"{outfilename}_nc{model.num_clusters}.pdf" ) as pdf:
+    #             for fig, axes in model.clusters_composition( dataset ):
+    #                 pdf.savefig( fig )
+    #                 plt.close( fig )
 
 
     def clusterize_data(self, dataset: fr.DataRuleSet) -> pd.DataFrame:

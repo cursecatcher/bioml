@@ -138,6 +138,7 @@ if __name__ == "__main__":
     if not os.path.exists(docker_outfolder):
         os.mkdir(docker_outfolder)                                      #build folder for docker container 
         print(f"Outfolder created in {docker_outfolder}")
+        
         try:
             for cat, cat_files in input_files.items():
                 outpath = os.path.join(docker_outfolder, cat)           #build a subfolder for each file category

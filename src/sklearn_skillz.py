@@ -8,6 +8,7 @@ from sklearn.linear_model import \
     LogisticRegression, \
     SGDClassifier, \
     LassoCV
+from sklearn.neighbors import KNeighborsClassifier
 from sklearn.naive_bayes import GaussianNB, BernoulliNB
 from sklearn.svm import LinearSVC, SVC
 from sklearn.ensemble import \
@@ -68,16 +69,21 @@ class FeatureSelector:
         if hasattr(estimator, "coef_"):
             coefficients = estimator.coef_[0]
             importances = self.f_importance(coefficients)
+            # print(importances)
 
         elif hasattr(estimator, "feature_importances_"):
             feature_importances = estimator.feature_importances_
             importances = self.f_importance(feature_importances)
-
+    
         return importances
                 
 
     def f_importance(self, coef): 
-        imp, names = zip(*sorted(zip(np.abs(coef), self.__selected_features), key=lambda pair: pair[1]))
+        imp, names = zip(
+            *sorted(
+                zip(np.abs(coef), self.__selected_features), 
+                key=lambda pair: pair[1]))
+                
         return pd.Series(data=imp, index=names)
 
 
@@ -86,10 +92,11 @@ class ClassifiersToEvaluate(enum.Enum):
     """ List of the classifiers to hypertune """
     LOGISTIC_REGRESSION = ("log_reg", LogisticRegression)
     RANDOM_FOREST = ("r_forest", RandomForestClassifier)
-    GRADIENT_BOOSTING = ("g_boost", GradientBoostingClassifier)
-    SVMACHINE = ("svm", SVC)
+    # GRADIENT_BOOSTING = ("g_boost", GradientBoostingClassifier)
+    # SVMACHINE = ("svm", SVC)
+    KNN = ("knn", KNeighborsClassifier)
     # LDA = ("lda", LinearDiscriminantAnalysis)
-    GAUSSIAN_NAIVE_BAYES = ("gauss_nb", GaussianNB)
+    # GAUSSIAN_NAIVE_BAYES = ("gauss_nb", GaussianNB)
     # BERNOULLI_NAIVE_BAYES = ("bern_nb", BernoulliNB)
 
     @classmethod
@@ -107,6 +114,9 @@ class ClassifiersToEvaluate(enum.Enum):
         
         elif clfcls is SVC:
             args = dict( probability = True )
+        
+        elif clfcls is KNeighborsClassifier:
+            pass
         
         elif clfcls is GaussianNB or clfcls is BernoulliNB:
             pass 
@@ -188,13 +198,22 @@ class ClassifiersHyperParameters:
             SVC: ClassifiersHyperParameters.svmParameters,
             GaussianNB: ClassifiersHyperParameters.gaussianNBClassifierParameters, 
             BernoulliNB: ClassifiersHyperParameters.bernoulliNBClassifierParameters, 
-            LinearDiscriminantAnalysis: ClassifiersHyperParameters.linearDiscriminantAnalysisParameters
+            LinearDiscriminantAnalysis: ClassifiersHyperParameters.linearDiscriminantAnalysisParameters,
+            KNeighborsClassifier: ClassifiersHyperParameters.knnParameters
         }
         clf_hp = params[ type( pipeline[-1] ) ]()        
         # get the hyperparameters of the rest of the pipeline 
         fs_hp = FeatureSelectionHyperParameters.get_params(pipeline, max_features)
 
         return {**fs_hp, **clf_hp}
+
+    @classmethod
+    def knnParameters(cls):
+        return dict(
+            knn = [KNeighborsClassifier()], 
+            knn__n_neighbors = [3,5,7], 
+            knn__weights = ["uniform", "distance"]
+        )
 
     @classmethod
     def linearDiscriminantAnalysisParameters(cls):
@@ -226,12 +245,12 @@ class ClassifiersHyperParameters:
     @classmethod
     def svmParameters(cls):
         return dict(
-            lin_SVM = [LinearSVC()], 
-            lin_SVM__penalty = ["l1", "l2"], 
-            lin_SVM__loss = ["hinge", "squared_hinge"], 
-            lin_SVM__C = [0.1, 1, 10, 100, 1000], 
-            lin_SVM__dual = [False], 
-            lin_SVM__max_iter = [10000], 
+            svm = [SVC()], 
+            svm__kernel = [ "rbf", "sigmoid", "poly" ], 
+            svm__C = [0.01, 0.1, 1, 10, 100], 
+            svm__probability = [True]
+
+            # svm__dual = [False], 
         )
     
     @classmethod
@@ -290,19 +309,45 @@ class AbstractPipeline(abc.ABC):
         ]
     
 
+    
 
-class KBestEstimator(AbstractPipeline):
-    def __init__(self, dataset, k=None):
+class FilterBasedEstimator(AbstractPipeline):
+    def __init__(self, dataset, criterion, k = None):
+        self.__criterion = criterion
         if k is None:
-            k = dataset.shape[1] // 2
+            k = dataset.shape[1] 
             while k > 1000:
-                k //= 2
+                k // 2
 
         super().__init__(dataset, [
-            ("var_threshold", VarianceThreshold()),
-            ("scaler", StandardScaler()),
-            ("selector", SelectKBest(k=k))]
-        )
+            ("var_threshold", VarianceThreshold()), 
+            ("scaler", StandardScaler()), 
+            ("selector", SelectKBest(score_func=criterion, k = k))
+        ])
+    
+
+
+class ANOVAEstimator(FilterBasedEstimator):
+    def __init__(self, dataset, k=None):
+        super().__init__(dataset, f_classif, k)
+
+class MIEstimator(FilterBasedEstimator):
+    def __init__(self, dataset, k=None):
+        super().__init__(dataset, mutual_info_classif, k)
+
+
+# class KBestEstimator(AbstractPipeline):
+#     def __init__(self, dataset, k=None):
+#         if k is None:
+#             k = dataset.shape[1] // 2
+#             while k > 1000:
+#                 k //= 2
+
+#         super().__init__(dataset, [
+#             ("var_threshold", VarianceThreshold()),
+#             ("scaler", StandardScaler()),
+#             ("selector", SelectKBest(k=k))]
+#         )
 
 class EstimatorWithoutFS(AbstractPipeline):
     def __init__(self, dataset):
@@ -320,18 +365,15 @@ class FromModelEstimator(AbstractPipeline):
 
         sfm_params = dict( estimator = estimator )
         if k:
-            sfm_params = dict( 
-                ** sfm_params, max_features = k, threshold = -np.inf )
+            new_args = dict( max_features = k, threshold = -np.inf )
+            sfm_params = dict( ** sfm_params, ** new_args )
 
         super().__init__(dataset, [
             ("var_threshold", VarianceThreshold()),
             ("scaler", StandardScaler()), 
             ("selector", SelectFromModel( ** sfm_params ))
         ])
-    
-    @property
-    def estimator( self ):
-        return self.__estimator
+
 
 class FromLogisticEstimator( FromModelEstimator ):
     def __init__(self, dataset, k=None):
@@ -349,7 +391,8 @@ class FromRandomForestEstimator( FromModelEstimator ):
 class PipelineNamesUtility:
     def __init__(self) -> None:
         self.__mapping = {
-            SelectKBest: "anova", 
+            ANOVAEstimator: "anova", 
+            MIEstimator: "entropy",
             FromLogisticEstimator: "sfLR",
             FromRandomForestEstimator: "sfRF"
         }
