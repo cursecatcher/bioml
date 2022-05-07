@@ -245,8 +245,6 @@ class Explainable:
 
             logging.info(f"Considering {len(curr_rules)} rules right now.")
 
-            print(curr_rules.rules)
-
             #perform classification task using n rules as features 
             self.classification_via_rules( 
                 outfolder, curr_rules, n_replic=10, ncv = 5 )

@@ -23,7 +23,6 @@ logging.basicConfig(level=utils.logginglevel)
 
 
 class PipelinesEvaluator:
-    # def __init__(self, X, y, n_folds, target_labels):
     def __init__(self, dataset: ds.BinaryClfDataset, n_folds) -> None:
         self.__dataset = dataset 
 

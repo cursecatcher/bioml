@@ -1,8 +1,6 @@
 #!/usr/bin/env python3 
 
 
-from email.policy import default
-
 from matplotlib import backends
 import dataset as ds 
 import pandas as pd 
@@ -142,7 +140,6 @@ class FeaturesSearcher:
 
         #################### XXX process vset_data
         # print(vset_data)
-        # raise Exception("la bagassa di pio nono")
         # metrics_dict = defaultdict( list )
 
         # for rep in vset_data:
@@ -176,7 +173,6 @@ class FeaturesSearcher:
 
 
         for measure, statsfile in outfiles.items():
-            #### XXX FIX: measure variable isn't used ...
             obj = SignatureIdentifier( statsfile )
             pdfname = os.path.join( self.__output_folder, f"{measure}_Kplot.pdf" )
             with utils.backend_pdf.PdfPages( pdfname ) as pdf:
@@ -256,7 +252,7 @@ class FeaturesSearcher:
                 del fcounts[np.nan]
                 
             selected = sorted([x for x, _ in fcounts.most_common(k)])
-            return pd.Series(selected)
+            return pd.Series(selected, dtype="float64")
 
         output_filenames = dict()
 

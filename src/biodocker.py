@@ -14,6 +14,8 @@ VALIDATION_SETS = "validation_sets"
 RULES_LISTS = "rules"
 VALID_SAMPLES_ID = "vid"
 
+SOURCE_FOLDER="featsee"
+
 
 
 def get_parser(prog: str) -> argparse.ArgumentParser:
@@ -30,6 +32,7 @@ def get_parser(prog: str) -> argparse.ArgumentParser:
     parser.add_argument(f"--{VALID_SAMPLES_ID}", type=str, required=False)     #list of samples to be used as validation set 
 
     parser.add_argument("--as_root", action="store_true")
+    parser.add_argument("--image", type=str, default="cursecatcher/featsee")
 
     return parser 
 
@@ -68,7 +71,7 @@ def get_script(args):
 
         sys.exit("Please select an operation:\n- classification: --clf\n- feature selection: --fsel\nexplainable ml: --xai")
 
-    sourcefolder = "/bioml"
+    sourcefolder = f"/{SOURCE_FOLDER}"
 
     if args.clf:
         script = "classification.py"
@@ -186,7 +189,7 @@ if __name__ == "__main__":
         docker_run.append(f"--name {args.container_name}")
     
     image_tag = f":{args.tag}"
-    docker_run.append( f"cursecatcher/bioml{image_tag} {pyscript} -o /data/{os.path.basename(args.docker_outfolder)}_results" ) #set output folder 
+    docker_run.append( f"{args.image}{image_tag} {pyscript} -o /data/{os.path.basename(args.docker_outfolder)}_results" ) #set output folder 
     docker_run.append( " ".join(formatted_args) )
     
     if unknownargs:
